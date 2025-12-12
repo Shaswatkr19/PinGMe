@@ -58,54 +58,49 @@ This project focuses on building a **scalable, secure, and production-ready chat
 
 ---
 
-## 📂 Project Structure
+## 🚧 Upcoming Features 
 
-PingMe/
-├── backend/
-│   ├── core/
-│   ├── users/
-│   ├── chat/
-│   ├── manage.py
-│   └── db.sqlite3
-├── venv/
-├── .gitignore
-└── README.md
+- Typing indicator
+- Online / offline user presence
+- Read receipts
+- Group chat support
+- Media sharing (images, files, videos)
+- WebSocket reconnect & retry handling
+- React / Next.js frontend
+- Docker setup & cloud deployment
 
+---
 
-🚧 Upcoming Features 
-	•	Typing indicator
-	•	Online / offline user presence
-	•	Read receipts
-	•	Group chats
-	•	Media sharing (images, files, videos)
-	•	WebSocket reconnect handling
-	•	React / Next.js frontend
-	•	Docker & cloud deployment
+## 🎯 Learning Outcomes
 
+- Django Channels & WebSocket architecture
+- Async DB handling using `database_sync_to_async`
+- JWT authentication beyond REST APIs
+- Redis channel layers & pub/sub
+- Designing a real-world chat backend system
 
-🎯 Learning Outcomes
-	•	Django Channels & WebSockets
-	•	Async DB handling with database_sync_to_async
-	•	JWT authentication beyond REST APIs
-	•	Redis channel layers
-	•	Real-world chat backend design    
+---
 
+## ⭐ Project Status
 
-⭐ Status
+- 🚧 **Under active development**
+- ❌ Frontend not implemented yet
+- ⚠️ Not production-ready (yet)
 
-This project is under active development.
-Frontend is not yet implemented.
-This project is not yet production ready.
-
+---
 
 ## 📜 License
-This project is licensed under the MIT License. See the LICENSE file for details.
 
+This project is licensed under the **MIT License**.  
+See the `LICENSE` file for more details.
 
-👨‍💻 Author
+---
 
-Shaswat Kumar
+## 👨‍💻 Author
+
+**Shaswat Kumar**  
 Backend Developer (Python / Django)
 
-⸻
+---
 
+> Built with ❤️ while learning real world backend systems.
