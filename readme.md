@@ -1,8 +1,11 @@
-# 🚀 PingMe – Real-Time Chat Backend
+# 🚀 PingMe – Chat Application 
 
-PingMe is a **real-time chat backend** built using **Django, Django REST Framework, and Django Channels**.
+PingMe is a **real time chat application** inspired by modern messaging platforms like **WhatsApp and Instagram DMs**.
 
-This project focuses on building a **scalable, secure, and production-ready chat system** similar to WhatsApp / Instagram DM, starting from backend fundamentals.
+The project is being developed with a **backend-first approach**, focusing initially on building a **scalable, secure, and real-time messaging backend** using **Django, Django REST Framework, and Django Channels**.  
+A modern frontend (React / Next.js) will be integrated in upcoming phases.
+
+PingMe is designed as a **learning-driven yet production-oriented project**, aiming to cover real world system design, authentication, WebSockets, and async backend patterns.
 
 ---
 
