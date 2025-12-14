@@ -55,6 +55,12 @@ class CreateThreadView(generics.CreateAPIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        if (
+            other_user in request.user.blocked_users.all()
+            or request.user in other_user.blocked_users.all()
+        ):
+            return Response({"error": "User blocked"}, status=403)    
+
         thread = Thread.objects.filter(
             members=request.user
         ).filter(
@@ -119,6 +125,7 @@ class SendMessageView(generics.CreateAPIView):
 
     def perform_create(self, serializer):
         thread_id = self.kwargs.get("thread_id")
+        user = self.request.user
 
         thread = Thread.objects.filter(
             id=thread_id,
@@ -127,6 +134,13 @@ class SendMessageView(generics.CreateAPIView):
 
         if not thread:
             raise PermissionDenied("You are not allowed in this thread")
+
+        other_user = thread.members.exclude(id=user.id).first()
+        if (
+            other_user in user.blocked_users.all()
+            or user in other_user.blocked_users.all()
+        ):
+            raise PermissionDenied("User blocked")    
 
         message = serializer.save(
             sender=self.request.user,
@@ -210,13 +224,4 @@ class MediaMessageUploadView(APIView):
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-class DeleteMessageView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, message_id):
-        msg = Message.objects.filter(id=message_id).first()
-        if not msg:
-            return Response(status=404)
-
-        msg.deleted_by.add(request.user)
-        return Response({"status": "deleted"})        
+        
