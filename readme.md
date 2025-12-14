@@ -102,8 +102,9 @@ See the `LICENSE` file for more details.
 ## 👨‍💻 Author
 
 **Shaswat Kumar**  
-Backend Developer (Python / Django)
+Backend Developer 
+(Python / Django)
 
 ---
 
-> Built with ❤️ while learning real world backend systems.
+> **Built with ❤️ while learning real world backend systems.**
