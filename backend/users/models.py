@@ -29,6 +29,13 @@ class User(AbstractBaseUser, PermissionsMixin):
     last_seen = models.DateTimeField(null=True, blank=True)
     is_online = models.BooleanField(default=False)
 
+    blocked_users = models.ManyToManyField(
+        "self",
+        symmetrical=False,
+        related_name="blocked_by",
+        blank=True
+    )
+
     objects = UserManager()
 
     USERNAME_FIELD = "username"

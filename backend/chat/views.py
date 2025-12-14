@@ -4,6 +4,11 @@ from rest_framework.exceptions import PermissionDenied
 from .models import Thread, Message
 from .serializers import ThreadSerializer, MessageSerializer
 from users.models import User
+from rest_framework.views import APIView
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.permissions import IsAuthenticated
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 
 
 # -----------------------------
@@ -88,6 +93,8 @@ class MessageListView(generics.ListAPIView):
 
         messages = Message.objects.filter(
             thread=thread
+        ).exclude(
+            deleted_by=user
         ).order_by("created_at")
 
         # 🔥 MARK AS READ (PER USER)
@@ -128,3 +135,88 @@ class SendMessageView(generics.CreateAPIView):
 
         # sender ne khud ka message read kiya hua hota hai
         message.read_by.add(self.request.user)
+
+
+class MediaMessageUploadView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, thread_id):
+        user = request.user
+        file = request.FILES.get("file")
+        text = request.data.get("text", "")
+
+        # 1️⃣ FILE REQUIRED
+        if not file:
+            return Response(
+                {"error": "File is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 2️⃣ FILE SIZE VALIDATION (10 MB)
+        MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+        if file.size > MAX_FILE_SIZE:
+            return Response(
+                {"error": "File too large (max 10MB)"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 3️⃣ FILE TYPE VALIDATION
+        ALLOWED_TYPES = [
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "video/mp4",
+            "application/pdf",
+        ]
+
+        if file.content_type not in ALLOWED_TYPES:
+            return Response(
+                {"error": "Unsupported file type"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 4️⃣ THREAD CHECK
+        thread = Thread.objects.filter(
+            id=thread_id,
+            members=user
+        ).first()
+
+        if not thread:
+            raise PermissionDenied("You are not allowed in this thread")
+
+        # 5️⃣ CREATE MESSAGE
+        message = Message.objects.create(
+            thread=thread,
+            sender=user,
+            text=text,
+            attachment=file
+        )
+
+        serializer = MessageSerializer(
+            message,
+            context={"request": request}
+        )
+
+        # 6️⃣ WEBSOCKET BROADCAST
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"chat_{thread.id}",
+            {
+                "type": "chat_message",
+                "message": serializer.data
+            }
+        )
+
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+class DeleteMessageView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, message_id):
+        msg = Message.objects.filter(id=message_id).first()
+        if not msg:
+            return Response(status=404)
+
+        msg.deleted_by.add(request.user)
+        return Response({"status": "deleted"})        

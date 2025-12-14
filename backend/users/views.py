@@ -125,3 +125,11 @@ class UserOnlineStatusView(APIView):
             "username": user.username,
             "is_online": bool(is_online)
         })        
+
+class BlockUserView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, user_id):
+        other = User.objects.get(id=user_id)
+        request.user.blocked_users.add(other)
+        return Response({"status": "blocked"})        

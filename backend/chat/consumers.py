@@ -50,6 +50,9 @@ class ChatConsumer(AsyncWebsocketConsumer):
         )
 
         # Mark user online
+        await self.mark_messages_delivered(self.user.id, self.thread_id)
+
+
         await self.set_user_online(self.user.id)
 
         await self.accept()
@@ -116,6 +119,16 @@ class ChatConsumer(AsyncWebsocketConsumer):
             )
             return
 
+        if event_type == "media":
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {
+                    "type": "chat_message",
+                    "message": data
+                }
+            )
+            return
+            
         # -----------------------------
         # NORMAL MESSAGE
         # -----------------------------
@@ -242,10 +255,18 @@ class ChatConsumer(AsyncWebsocketConsumer):
         cache.delete(f"user_online_{user_id}")
 
     @database_sync_to_async
-    def mark_delivered(self, message_id, user_id):
-        msg = Message.objects.get(id=message_id)
+    def mark_messages_delivered(self, user_id, thread_id):
         user = User.objects.get(id=user_id)
+        thread = Thread.objects.get(id=thread_id)
 
-        if user != msg.sender:
-            msg.delivered_to.add(user)    
-    
+        messages = Message.objects.filter(
+            thread=thread
+        ).exclude(
+            sender=user
+        ).exclude(
+            delivered_to=user
+        )
+
+        for msg in messages:
+            msg.delivered_to.add(user)
+        

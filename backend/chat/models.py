@@ -44,5 +44,11 @@ class Message(models.Model):
         blank=True
     )
 
+    deleted_by = models.ManyToManyField(
+        User,
+        related_name="deleted_messages",
+        blank=True
+    )
+
     def __str__(self):
         return f"{self.sender}: {self.text[:20]}"
