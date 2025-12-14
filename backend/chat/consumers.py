@@ -1,6 +1,8 @@
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
+from django.utils import timezone
 import json
 
 from .models import Thread, Message
@@ -20,56 +22,113 @@ class EchoConsumer(AsyncWebsocketConsumer):
 
 class ChatConsumer(AsyncWebsocketConsumer):
 
+    # =============================
+    # CONNECT
+    # =============================
     async def connect(self):
+        self.user = self.scope.get("user")
+
+        # 🔐 Auth check
+        if not self.user or not self.user.is_authenticated:
+            await self.close()
+            return
+
         self.thread_id = self.scope["url_route"]["kwargs"]["thread_id"]
+
+        # 🔐 Thread membership check
+        allowed = await self.is_user_in_thread(self.user.id, self.thread_id)
+        if not allowed:
+            await self.close()
+            return
+
         self.room_group_name = f"chat_{self.thread_id}"
 
-        # Add client to room group
+        # Join group
         await self.channel_layer.group_add(
             self.room_group_name,
             self.channel_name
         )
 
+        # Mark user online
+        await self.set_user_online(self.user.id)
+
         await self.accept()
 
+        # 🔥 BROADCAST ONLINE STATUS
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type": "presence_event",
+                "user_id": self.user.id,
+                "is_online": True,
+            }
+        )
+
         await self.send(json.dumps({
+            "type": "system",
             "msg": f"Connected to chat room {self.thread_id}"
         }))
 
+    # =============================
+    # DISCONNECT
+    # =============================
     async def disconnect(self, close_code):
-        await self.channel_layer.group_discard(
-            self.room_group_name,
-            self.channel_name
-        )
+    # Agar user authenticated hai tabhi offline mark karo
+        if getattr(self, "user", None) and self.user.is_authenticated:
+            await self.set_user_offline(self.user.id)
 
+        # 🔥 ONLINE → OFFLINE broadcast (safe)
+        if hasattr(self, "room_group_name"):
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {
+                    "type": "presence_event",
+                    "user_id": self.user.id,
+                    "is_online": False,
+                }
+            )
+
+    # 🔐 Group se safely remove karo
+        if hasattr(self, "room_group_name"):
+            await self.channel_layer.group_discard(
+                self.room_group_name,
+                self.channel_name
+            )
+
+    # =============================
+    # RECEIVE
+    # =============================
     async def receive(self, text_data):
-        """
-        Receive WebSocket message → authenticate → save to DB → broadcast
-        """
         data = json.loads(text_data)
-        message_text = data.get("message", "")
+        event_type = data.get("type")
 
-        # -------------------------
-        # AUTH CHECK (IMPORTANT)
-        # -------------------------
-        user = self.scope.get("user")
-
-        if not user or getattr(user, "is_authenticated", False) is False:
-            await self.send(json.dumps({"error": "Unauthenticated"}))
+        # -----------------------------
+        # TYPING INDICATOR
+        # -----------------------------
+        if event_type == "typing":
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {
+                    "type": "typing_event",
+                    "user_id": self.user.id,
+                    "is_typing": data.get("is_typing", False),
+                }
+            )
             return
 
-        # -------------------------
-        # SAVE MESSAGE IN DATABASE
-        # -------------------------
+        # -----------------------------
+        # NORMAL MESSAGE
+        # -----------------------------
+        message_text = data.get("message", "").strip()
+        if not message_text:
+            return
+
         saved_message = await self.save_message(
-            sender_id=user.id,
+            sender_id=self.user.id,
             thread_id=self.thread_id,
             text=message_text
         )
 
-        # -------------------------
-        # BROADCAST TO ALL MEMBERS
-        # -------------------------
         await self.channel_layer.group_send(
             self.room_group_name,
             {
@@ -78,15 +137,68 @@ class ChatConsumer(AsyncWebsocketConsumer):
             }
         )
 
+    # =============================
+    # SEND MESSAGE TO CLIENT
+    # =============================
     async def chat_message(self, event):
-        """
-        Send message to WebSocket
-        """
-        await self.send(json.dumps(event["message"]))
+        message = event["message"]
 
-    # ====================================
-    # DB helper (runs inside thread pool)
-    # ====================================
+    # ✅ Mark delivered
+        await self.mark_delivered(
+            message_id=message["id"],
+            user_id=self.user.id
+        )
+
+        await self.send(json.dumps({
+            "type": "message",
+            **message
+        }))
+
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type": "delivery_event",
+                "message_id": message["id"],
+                "user_id": self.user.id,
+            }
+        )
+
+    # =============================
+    # SEND TYPING EVENT
+    # =============================
+    async def typing_event(self, event):
+        # Sender ko wapas typing event mat bhejo
+        if event["user_id"] == self.user.id:
+            return
+
+        await self.send(json.dumps({
+            "type": "typing",
+            "user_id": event["user_id"],
+            "is_typing": event["is_typing"]
+        }))
+
+    # SEND ONLINE / OFFLINE EVENT
+    async def presence_event(self, event):
+    # apne aap ko wapas mat bhejo
+        if event["user_id"] == self.user.id:
+            return
+
+        await self.send(json.dumps({
+            "type": "presence",
+            "user_id": event["user_id"],
+            "is_online": event["is_online"]
+        }))    
+
+    async def delivery_event(self, event):
+        await self.send(json.dumps({
+            "type": "delivered",
+            "message_id": event["message_id"],
+            "user_id": event["user_id"],
+        }))
+
+    # =============================
+    # DB: SAVE MESSAGE
+    # =============================
     @database_sync_to_async
     def save_message(self, sender_id, thread_id, text):
         sender = User.objects.get(id=sender_id)
@@ -99,3 +211,41 @@ class ChatConsumer(AsyncWebsocketConsumer):
         )
 
         return MessageSerializer(msg).data
+
+    # =============================
+    # SECURITY: THREAD CHECK
+    # =============================
+    @database_sync_to_async
+    def is_user_in_thread(self, user_id, thread_id):
+        return Thread.objects.filter(
+            id=thread_id,
+            members__id=user_id
+        ).exists()
+
+    # =============================
+    # ONLINE / OFFLINE HELPERS
+    # =============================
+    @database_sync_to_async
+    def set_user_online(self, user_id):
+        User.objects.filter(id=user_id).update(
+            is_online=True,
+            last_seen=timezone.now()
+        )
+        cache.set(f"user_online_{user_id}", True)
+
+    @database_sync_to_async
+    def set_user_offline(self, user_id):
+        User.objects.filter(id=user_id).update(
+            is_online=False,
+            last_seen=timezone.now()
+        )
+        cache.delete(f"user_online_{user_id}")
+
+    @database_sync_to_async
+    def mark_delivered(self, message_id, user_id):
+        msg = Message.objects.get(id=message_id)
+        user = User.objects.get(id=user_id)
+
+        if user != msg.sender:
+            msg.delivered_to.add(user)    
+    

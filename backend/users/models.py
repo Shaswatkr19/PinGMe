@@ -26,6 +26,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
 
+    last_seen = models.DateTimeField(null=True, blank=True)
+    is_online = models.BooleanField(default=False)
+
     objects = UserManager()
 
     USERNAME_FIELD = "username"

@@ -5,6 +5,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import User
+from django.core.cache import cache
+from django.db.models import Q
 from .serializers import RegisterSerializer, UserSerializer, UpdateProfileSerializer, PublicUserSerializer
 
 class RegisterView(generics.CreateAPIView):
@@ -75,3 +77,51 @@ class UnfollowUserView(APIView):
 
         request.user.following.remove(target)
         return Response({"message": f"You unfollowed {username}"})
+
+
+class UserSearchView(generics.ListAPIView):
+    serializer_class = UserSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        query = self.request.query_params.get("q", "")
+
+        return User.objects.filter(
+            Q(username_icontains=query)
+        ).exclude(id=self.request.user.id)
+
+
+class MyProfileView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        serializer = UserSerializer(request.user)
+        return Response(serializer.data)
+
+    def put(self, request):
+        serializer = UserSerializer(
+            request.user,
+            data=request.data,
+            partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+
+class UserOnlineStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, user_id):
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=404)
+
+        is_online = cache.get(f"user_online_{user.id}", False)
+
+        return Response({
+            "user_id": user.id,
+            "username": user.username,
+            "is_online": bool(is_online)
+        })        
