@@ -30,6 +30,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "file_name",
             "file_size",
             "file_type",
+            "delivery_status",
             
         ]
         read_only_fields = ['sender', 'created_at']
