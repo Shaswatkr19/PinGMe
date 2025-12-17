@@ -136,11 +136,13 @@ class SendMessageView(generics.CreateAPIView):
             raise PermissionDenied("You are not allowed in this thread")
 
         other_user = thread.members.exclude(id=user.id).first()
-        if (
-            other_user in user.blocked_users.all()
-            or user in other_user.blocked_users.all()
-        ):
-            raise PermissionDenied("User blocked")    
+
+        if other_user:
+            if (
+                other_user in user.blocked_users.all()
+                or user in other_user.blocked_users.all()
+            ):
+                raise PermissionDenied("User blocked")   
 
         message = serializer.save(
             sender=self.request.user,

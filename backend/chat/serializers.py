@@ -33,7 +33,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "delivery_status",
             
         ]
-        read_only_fields = ['sender', 'created_at']
+        read_only_fields = ['sender', 'created_at', 'thread']
 
     def get_delivered_count(self, obj):
         return obj.delivered_to.count()
