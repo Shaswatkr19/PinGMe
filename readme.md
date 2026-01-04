@@ -107,4 +107,4 @@ Backend Developer
 
 ---
 
-> **Built with ❤️ while learning real world backend systems.**
+> **Built with 😎 while learning real world backend systems.**
