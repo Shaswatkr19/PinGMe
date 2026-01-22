@@ -32,7 +32,7 @@ export default function Login() {
       console.log("Refresh:", localStorage.getItem("refresh"));
 
       // Navigate
-      navigate("/");
+      window.location.href = "/";
       
     } catch (err) {
       console.error("❌ Login error:", err);

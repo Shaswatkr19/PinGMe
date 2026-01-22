@@ -1,8 +1,9 @@
-import jwt
-from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AnonymousUser
 from urllib.parse import parse_qs
 from channels.db import database_sync_to_async
+from rest_framework_simplejwt.tokens import UntypedToken
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 
 User = get_user_model()
 
@@ -12,67 +13,51 @@ class JWTAuthMiddleware:
         self.inner = inner
 
     async def __call__(self, scope, receive, send):
+        # ✅ VERY IMPORTANT
+        scope["user"] = AnonymousUser()
 
-        # ------------------------------------
-        # 1) Extract token from WebSocket header
-        # ------------------------------------
-        headers = dict(scope.get("headers", []))
         token = None
 
+        # ------------------------------------
+        # 1️⃣ Token from Authorization header
+        # ------------------------------------
+        headers = dict(scope.get("headers", []))
         if b"authorization" in headers:
             try:
                 auth = headers[b"authorization"].decode()
                 if auth.startswith("Bearer "):
                     token = auth.split(" ")[1]
             except:
-                token = None
+                pass
 
         # ------------------------------------
-        # 2) Support token via ?token= query
+        # 2️⃣ Token from query string (?token=)
         # ------------------------------------
         if not token:
             query = parse_qs(scope.get("query_string", b"").decode())
             token = query.get("token", [None])[0]
 
-        # Default: Anonymous
-        scope["user"] = None
-
         # ------------------------------------
-        # 3) Validate JWT + Attach user to scope
+        # 3️⃣ Validate JWT (SimpleJWT way)
         # ------------------------------------
         if token:
             try:
-                # Match SimpleJWT: "user_id" field
-                payload = jwt.decode(
-                    token,
-                    settings.SECRET_KEY,
-                    algorithms=["HS256"]
-                )
+                UntypedToken(token)  # ✅ verifies signature + expiry
+                payload = UntypedToken(token).payload
                 user_id = payload.get("user_id")
 
                 if user_id:
                     user = await self.get_user(user_id)
-
-                    # IMPORTANT: must be a Django User object
                     if user:
                         scope["user"] = user
-                    else:
-                        print("JWT MIDDLEWARE: user not found")
-                else:
-                    print("JWT MIDDLEWARE: user_id missing")
-
-            except jwt.ExpiredSignatureError:
-                print("JWT MIDDLEWARE: token expired")
-            except jwt.InvalidTokenError:
-                print("JWT MIDDLEWARE: invalid token")
-
-        else:
-            print("JWT MIDDLEWARE: No token in request")
+                        print(f"✅ WS Authenticated user {user.id}")
+            except (InvalidToken, TokenError) as e:
+                print("❌ WS Invalid token:", e)
 
         return await self.inner(scope, receive, send)
 
     # ------------------------------------
-    # DB fetch must be sync → wrapped async
+    # DB helper
     # ------------------------------------
     @database_sync_to_async
     def get_user(self, user_id):
