@@ -3,7 +3,6 @@ import api from "../api/axios";
 
 export default function ChatLayout() {
   const [threads, setThreads] = useState([]);
-  const [selectedThread, setSelectedThread] = useState(null);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [messageInput, setMessageInput] = useState("");
@@ -14,7 +13,6 @@ export default function ChatLayout() {
   const [isTyping, setIsTyping] = useState(false);
   const [typingTimeout, setTypingTimeout] = useState(null);
   const [showMenu, setShowMenu] = useState(false);
-  const [isBlocked, setIsBlocked] = useState(false);
   const [isFollowing, setIsFollowing] = useState(true);
   const [theme, setTheme] = useState("light"); // light | dark
   const [showCallOptions, setShowCallOptions] = useState(false);
@@ -29,6 +27,47 @@ export default function ChatLayout() {
   const [isVideoOff, setIsVideoOff] = useState(false);
   const remoteVideoRef = useRef(null);
   const localVideoRef = useRef(null);
+  const [isVideoReady, setIsVideoReady] = useState(false);
+
+  const [isBlocked, setIsBlocked] = useState(() => {
+    return localStorage.getItem("blocked") === "true";
+  });
+
+  const [selectedThread, setSelectedThread] = useState(() => {
+    const saved = localStorage.getItem("active_thread");
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  const handleLogout = () => {
+    // 🔐 Clear auth tokens
+    localStorage.removeItem("access");
+    localStorage.removeItem("refresh");
+  
+    // 🧠 Clear last opened chat
+    localStorage.removeItem("active_thread");
+  
+    // 📞 Close call socket safely
+    if (callSocketRef.current) {
+      callSocketRef.current.close();
+      callSocketRef.current = null;
+    }
+  
+    // 🧹 Cleanup call & UI state (VERY IMPORTANT)
+    peerRef.current?.close();
+    peerRef.current = null;
+  
+    localStreamRef.current?.getTracks().forEach(t => t.stop());
+    localStreamRef.current = null;
+  
+    setCallStatus(null);
+    setCallType(null);
+    setCallMode(null);
+    setSelectedThread(null);
+    setMessages([]);
+  
+    // 🚪 Redirect
+    window.location.href = "/login";
+  };
 
 
   const handleCallSignal = async (msg) => {
@@ -133,6 +172,7 @@ export default function ChatLayout() {
     </button>
   );
 
+
   const callOptionStyle = {
     width: "100%",
     padding: "10px 14px",
@@ -187,6 +227,7 @@ export default function ChatLayout() {
   const handleThreadClick = (thread) => {
     console.log("🔍 Thread clicked:", thread);
     setSelectedThread(thread);
+    localStorage.setItem("active_thread", JSON.stringify(thread));
   };
 
   const formatTime = (date) => {
@@ -290,6 +331,7 @@ export default function ChatLayout() {
       // video
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = stream;
+        setIsVideoReady(true);
       }
     };
   
@@ -322,15 +364,29 @@ export default function ChatLayout() {
   }
 
   async function switchToVideo() {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true
+    });
+  
     const videoTrack = stream.getVideoTracks()[0];
   
     const sender = peerRef.current
       .getSenders()
       .find(s => s.track?.kind === "video");
   
-    if (sender) sender.replaceTrack(videoTrack);
-    else peerRef.current.addTrack(videoTrack, stream);
+    if (sender) {
+      sender.replaceTrack(videoTrack);
+    } else {
+      peerRef.current.addTrack(videoTrack, stream);
+    }
+  
+    // 🔥 ADD THIS
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = stream;
+    }
+  
+    localStreamRef.current.addTrack(videoTrack);
   
     setCallMode("video");
   
@@ -345,7 +401,10 @@ export default function ChatLayout() {
       .getSenders()
       .find(s => s.track?.kind === "video");
   
-    if (sender) sender.replaceTrack(null);
+    if (sender && sender.track) {
+      sender.track.stop();
+      peerRef.current.removeTrack(sender);
+    }
   
     setCallMode("audio");
   
@@ -379,6 +438,7 @@ export default function ChatLayout() {
   setCallMode(null);
   setIsMuted(false);
   setIsVideoOff(false);
+  setIsVideoReady(false);
 }
 
   // Send message function
@@ -478,49 +538,48 @@ export default function ChatLayout() {
     <>
       <audio ref={remoteAudioRef} autoPlay />
 
-      {/* LOCAL VIDEO */}
-      <video
-        ref={localVideoRef}
-        autoPlay
-        muted
-        playsInline
-        style={{
-          position: "fixed",
-          bottom: 90,
-          right: 20,
-          width: 160,
-          height: 220,
-          borderRadius: 12,
-          background: "#000",
-          objectFit: "cover",
-          zIndex: 9999
-        }}
-      />
-
-      {/* REMOTE VIDEO */}
-      <video
-        ref={remoteVideoRef}
-        autoPlay
-        playsInline
-        style={{
+      {callStatus === "calling" && (
+        <div style={{
           position: "fixed",
           inset: 0,
-          width: "100%",
-          height: "100%",
-          background: "#000",
-          objectFit: "cover",
-          zIndex: 1
-        }}
-      />
+          background: "rgba(0,0,0,0.85)",
+          zIndex: 9997,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "#fff"
+        }}>
+          <div style={{ fontSize: 22, marginBottom: 8 }}>
+            📞 Calling…
+          </div>
+          <div style={{ opacity: 0.7, marginBottom: 20 }}>
+            Waiting for response
+          </div>
 
-      {/* VIDEO CALL UI */}
-      {callStatus === "connected" && callMode === "video" && (
+          <button
+            onClick={endCall}
+            style={{
+              background: "#ef4444",
+              padding: "10px 18px",
+              borderRadius: 12
+            }}
+          >
+            ❌ Cancel
+          </button>
+        </div>
+      )}
+
+      {callStatus === "connected" &&
+      callMode === "video" &&
+      isVideoReady && (   // 🔥 NEW GUARD
         <div style={{
           position: "fixed",
           inset: 0,
           background: "#000",
           zIndex: 9998
         }}>
+          
           {/* Remote Video */}
           <video
             ref={remoteVideoRef}
@@ -553,41 +612,8 @@ export default function ChatLayout() {
         </div>
       )}
 
-      {callStatus === "connected" && (
-        <div style={{
-          position: "fixed",
-          bottom: 20,
-          left: "50%",
-          transform: "translateX(-50%)",
-          background: "#111827",
-          padding: "14px 18px",
-          borderRadius: "18px",
-          display: "flex",
-          gap: "12px",
-          zIndex: 9999
-        }}>
-          <button onClick={toggleMute}>
-            {isMuted ? "🎤 Unmute" : "🔇 Mute"}
-          </button>
-
-          {callMode === "video" && (
-            <button onClick={toggleVideo}>
-              {isVideoOff ? "🎥 On" : "📷 Off"}
-            </button>
-          )}
-
-          {callMode === "audio" && (
-            <button onClick={switchToVideo}>🎥 Video</button>
-          )}
-
-          {callMode === "video" && (
-            <button onClick={switchToAudio}>🎧 Audio</button>
-          )}
-
-          <button onClick={endCall}>❌ End</button>
-        </div>
-      )}
-
+      
+      
       <div style={{
         display: 'flex',
         height: '100vh',
@@ -825,25 +851,34 @@ export default function ChatLayout() {
                 <div style={{ position: "relative" }}> 
                   {/* Call Button */} 
                   <button
-                    onClick={() => setShowCallOptions(prev => !prev)}
-                    title="Call"
+                    onClick={() => {
+                      if (isBlocked) return;
+                      setShowCallOptions(prev => !prev);
+                    }}
+                    title={isBlocked ? "User is blocked" : "Call"}
+                    disabled={isBlocked}
                     style={{
                       width: '36px',
                       height: '36px',
                       borderRadius: '50%',
                       border: 'none',
                       backgroundColor: showCallOptions ? '#E4E6EB' : 'transparent',
-                      cursor: 'pointer',
+                      cursor: isBlocked ? 'not-allowed' : 'pointer',
                       fontSize: '18px',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      transition: 'background-color 0.15s'
+                      transition: 'background-color 0.15s',
+                      opacity: isBlocked ? 0.4 : 1
                     }}
-                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#F0F2F5'}
-                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                    onMouseEnter={(e) => {
+                      if (!isBlocked) e.currentTarget.style.backgroundColor = '#F0F2F5';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isBlocked) e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
                   >
-                  📞
+                    📞
                   </button>
 
                   {/* AUDIO / VIDEO OPTIONS */}
@@ -861,15 +896,43 @@ export default function ChatLayout() {
                       minWidth: "150px"
                     }}>
                       <button
-                        onClick={() => startCall("audio")}
-                        style={callOptionStyle}
+                        onClick={() => {
+                          if (isBlocked) return;
+                          startCall("audio");
+                          setShowCallOptions(false);
+                        }}
+                        disabled={isBlocked}
+                        style={{
+                          width: "100%",
+                          padding: "10px 14px",
+                          border: "none",
+                          background: "white",
+                          cursor: isBlocked ? "not-allowed" : "pointer",
+                          fontSize: "14px",
+                          textAlign: "left",
+                          opacity: isBlocked ? 0.4 : 1
+                        }}
                       >
                         🎧 Audio Call
                       </button>
 
                       <button
-                        onClick={() => startCall("video")}
-                        style={callOptionStyle}
+                        onClick={() => {
+                          if (isBlocked) return;
+                          startCall("video");
+                          setShowCallOptions(false);
+                        }}
+                        disabled={isBlocked}
+                        style={{
+                          width: "100%",
+                          padding: "10px 14px",
+                          border: "none",
+                          background: "white",
+                          cursor: isBlocked ? "not-allowed" : "pointer",
+                          fontSize: "14px",
+                          textAlign: "left",
+                          opacity: isBlocked ? 0.4 : 1
+                        }}
                       >
                         🎥 Video Call
                       </button>
@@ -931,28 +994,34 @@ export default function ChatLayout() {
                     
                       
                       <MenuItem
-                        label={isBlocked ? "Unblock User" : "Block User"}
+                        label={isBlocked ? "🔓 Unblock User" : "🚫 Block User"}
                         onClick={() => {
-                          setIsBlocked(prev => !prev);
+                          const next = !isBlocked;          // ✅ FIX #1
+
+                          setIsBlocked(next);               // state update
+                          localStorage.setItem("blocked", String(next)); // ✅ FIX #2
+
                           setShowMenu(false);
                         }}
                       />
 
-                      <MenuItem
-                        label={theme === "light" ? "Dark Theme" : "Light Theme"}
-                        onClick={() => {
-                          setTheme(prev => prev === "light" ? "dark" : "light");
-                          setShowMenu(false);
-                        }}
-                      />
 
                       <MenuItem
-                        label={isFollowing ? "Unfollow" : "Follow"}
+                        label={isFollowing ? "❌ Unfollow" : "✅ Follow"}
                         onClick={() => {
                           setIsFollowing(prev => !prev);
                           setShowMenu(false);
                         }}
                       />
+
+                      {/* 🔥 LOGOUT */}
+                      <MenuItem
+                        label="🚪 Logout"
+                        onClick={() => {
+                          setShowMenu(false);
+                          handleLogout();
+                        }}
+                      />  
                     </div>
                   )}
                 </div>
@@ -1190,16 +1259,20 @@ export default function ChatLayout() {
                 position: 'relative'
               }}>
                 <button 
-                  onClick={() => fileInputRef.current.click()}
-                  title="Attach file"
+                  onClick={() => {
+                    if (isBlocked) return;
+                    fileInputRef.current.click();
+                  }}
+                  title={isBlocked ? "You blocked this user" : "Attach file"}
                   style={{
                     width: '36px',
                     height: '36px',
                     borderRadius: '50%',
                     border: 'none',
                     backgroundColor: 'transparent',
-                    cursor: 'pointer',
+                    cursor: isBlocked ? 'not-allowed' : 'pointer',
                     fontSize: '20px',
+                    opacity: isBlocked ? 0.4 : 1,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -1230,8 +1303,12 @@ export default function ChatLayout() {
                   value={messageInput}
                   onChange={handleTyping}
                   onKeyPress={handleKeyPress}
-                  placeholder="Type a message..."
-                  disabled={sending}
+                  placeholder={
+                    isBlocked
+                      ? "You blocked this user"
+                      : "Type a message..."
+                  }
+                  disabled={sending || isBlocked}
                   style={{
                     flex: 1,
                     padding: '10px 16px',
@@ -1239,7 +1316,8 @@ export default function ChatLayout() {
                     borderRadius: '20px',
                     fontSize: '14px',
                     outline: 'none',
-                    backgroundColor: '#F0F2F5',
+                    backgroundColor: isBlocked ? '#E5E7EB' : '#F0F2F5',
+                    cursor: isBlocked ? 'not-allowed' : 'text',
                     transition: 'all 0.15s'
                   }}
                   onFocus={(e) => {
@@ -1254,16 +1332,20 @@ export default function ChatLayout() {
 
                 <div style={{ position: 'relative' }}>
                   <button 
-                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                    title="Add emoji"
+                    onClick={() => {
+                      if (isBlocked) return;
+                      setShowEmojiPicker(!showEmojiPicker);
+                    }}
+                    title={isBlocked ? "You blocked this user" : "Add emoji"}
                     style={{
                       width: '36px',
                       height: '36px',
                       borderRadius: '50%',
                       border: 'none',
                       backgroundColor: 'transparent',
-                      cursor: 'pointer',
+                      cursor: isBlocked ? 'not-allowed' : 'pointer',
                       fontSize: '20px',
+                      opacity: isBlocked ? 0.4 : 1,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -1318,7 +1400,7 @@ export default function ChatLayout() {
                 {messageInput.trim() && (
                   <button 
                     onClick={handleSendMessage}
-                    disabled={sending}
+                    disabled={sending || isBlocked}
                     title="Send message"
                     style={{
                       width: '36px',
