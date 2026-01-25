@@ -2,10 +2,13 @@ from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 
 class UserManager(BaseUserManager):
-    def create_user(self, username, password=None, **extra_fields):
+    def create_user(self, username, password=None, email=None, **extra_fields):
         if not username:
             raise ValueError("User must have a username")
-        user = self.model(username=username, **extra_fields)
+        if not email:
+            raise ValueError("User must have an email")
+        email = self.normalize_email(email)
+        user = self.model(username=username, email=email, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
         return user
@@ -18,6 +21,7 @@ class UserManager(BaseUserManager):
 
 
 class User(AbstractBaseUser, PermissionsMixin):
+    email = models.EmailField(max_length=255, unique=True, null=False, blank=False)
     username = models.CharField(max_length=150, unique=True)
     avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
     bio = models.TextField(blank=True)

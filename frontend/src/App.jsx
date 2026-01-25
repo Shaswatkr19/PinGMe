@@ -2,6 +2,9 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 
 import Login from "./auth/Login";
+import Register from "./auth/Register";
+import PasswordReset from "./auth/PasswordReset";
+import PasswordResetConfirm from "./auth/PasswordResetConfirm";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ChatLayout from "./chat/ChatLayout";
 
@@ -18,6 +21,9 @@ export default function App() {
         <Routes>
           {/* 🔓 Public Routes */}
           <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/password-reset" element={<PasswordReset />} />
+          <Route path="/password-reset/confirm" element={<PasswordResetConfirm />} />
           <Route path="/about" element={<About />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />

@@ -1,9 +1,18 @@
 import { useEffect, useState } from "react";
 import { fetchThreads } from "../api/chat.api";
+import "./ThreadList.css";
 
 export default function ThreadList({ onSelect }) {
   const [threads, setThreads] = useState([]);
   const [loading, setLoading] = useState(true);
+
+
+  const getAvatarUrl = (user) => {
+    if (!user?.avatar) return null;
+    return user.avatar.startsWith("http")
+      ? user.avatar
+      : `http://127.0.0.1:8000${user.avatar}`;
+  };
 
   useEffect(() => {
     fetchThreads()
@@ -29,6 +38,18 @@ export default function ThreadList({ onSelect }) {
             onClick={() => onSelect(thread)}
           >
             <div className="avatar">
+              {getAvatarUrl(otherUser) ? (
+                <img
+                  src={getAvatarUrl(otherUser)}
+                  alt={otherUser.username}
+                  className="avatar-img"
+                />
+              ) : (
+                <div className="avatar-fallback">
+                  {otherUser?.username?.[0]?.toUpperCase()}
+                </div>
+              )}
+
               {otherUser?.is_online && <span className="online-dot" />}
             </div>
 

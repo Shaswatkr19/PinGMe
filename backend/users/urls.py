@@ -2,7 +2,9 @@ from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from .views import (
     RegisterView, LoginView, MeView,
-    UpdateProfileView, FollowUserView, UnfollowUserView, UserSearchView, MyProfileView, UserOnlineStatusView
+    UpdateProfileView, FollowUserView, UnfollowUserView, UserSearchView, MyProfileView, UserOnlineStatusView,
+    UsernameAvailabilityView, PasswordResetRequestView, PasswordResetConfirmView,
+    UnblockUserView, FollowersListView, FollowingListView, BlockedUsersListView
 )
 
 urlpatterns = [
@@ -18,6 +20,16 @@ urlpatterns = [
     path("follow/<str:username>/", FollowUserView.as_view()),
     path("unfollow/<str:username>/", UnfollowUserView.as_view()),
     path("search/", UserSearchView.as_view(), name="user-search"),
-    path("me/", MyProfileView.as_view(), name="my-profile"),
     path("online-status/<int:user_id>/", UserOnlineStatusView.as_view()),
+    
+    # New endpoints
+    path("check-username/", UsernameAvailabilityView.as_view()),
+    path("password-reset/request/", PasswordResetRequestView.as_view()),
+    path("password-reset/confirm/", PasswordResetConfirmView.as_view()),
+    
+    # Settings endpoints
+    path("me/followers/", FollowersListView.as_view()),
+    path("me/following/", FollowingListView.as_view()),
+    path("me/blocked/", BlockedUsersListView.as_view()),
+    path("unblock/<str:username>/", UnblockUserView.as_view()),
 ]

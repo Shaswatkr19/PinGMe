@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from users.serializers import UserSerializer
 from .models import Thread, Message
+import mimetypes
 
 
 class MessageSerializer(serializers.ModelSerializer):
@@ -79,9 +80,22 @@ class MessageSerializer(serializers.ModelSerializer):
         return None
 
     def get_file_type(self, obj):
-        if obj.attachment:
-            return obj.attachment.file.content_type
-        return None
+        if not obj.attachment:
+            return None
+
+        mime_type, _ = mimetypes.guess_type(obj.attachment.name)
+        return mime_type
+    
+    def to_representation(self, instance):
+        """Override to include full attachment URL"""
+        data = super().to_representation(instance)
+        if instance.attachment:
+            request = self.context.get("request")
+            if request:
+                data['attachment'] = request.build_absolute_uri(instance.attachment.url)
+            else:
+                data['attachment'] = instance.attachment.url
+        return data
 
 class ThreadSerializer(serializers.ModelSerializer):
     members = UserSerializer(many=True, read_only=True)
@@ -102,7 +116,10 @@ class ThreadSerializer(serializers.ModelSerializer):
     def get_last_message(self, obj):
         msg = obj.messages.order_by('-created_at').first()
         if msg:
-            return MessageSerializer(msg).data
+            return MessageSerializer(
+                msg,
+                context=self.context   # 🔥 VERY IMPORTANT
+            ).data
         return None
 
     def get_unread_count(self, obj):

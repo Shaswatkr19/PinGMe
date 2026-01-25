@@ -4,10 +4,16 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.parsers import MultiPartParser, FormParser
 from .models import User
 from django.core.cache import cache
 from django.db.models import Q
 from .serializers import RegisterSerializer, UserSerializer, UpdateProfileSerializer, PublicUserSerializer
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.utils.encoding import force_bytes, force_str
+from django.core.mail import send_mail
+from django.conf import settings
 
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
@@ -42,19 +48,31 @@ class MeView(generics.RetrieveAPIView):
 
     def get_object(self):
         return self.request.user
+    
+    def get_serializer_context(self):
+        return {"request": self.request}
 
 
 class UpdateProfileView(APIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]  # Support file uploads
 
     def patch(self, request):
         serializer = UpdateProfileSerializer(
             request.user, data=request.data, partial=True
         )
+        
         if serializer.is_valid():
             serializer.save()
-            return Response({"message": "Profile updated successfully"})
-        return Response(serializer.errors, status=400)
+            
+            # Refresh user from database to get updated avatar URL
+            request.user.refresh_from_db()
+            
+            # Return updated user data with full avatar URL
+            user_serializer = UserSerializer(request.user, context={"request": request})
+            return Response(user_serializer.data)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class FollowUserView(APIView):
@@ -91,8 +109,134 @@ class UserSearchView(generics.ListAPIView):
         query = self.request.query_params.get("q", "")
 
         return User.objects.filter(
-            Q(username_icontains=query)
+            Q(username__icontains=query)
         ).exclude(id=self.request.user.id)
+    
+    def get_serializer_context(self):
+        return {"request": self.request}
+
+
+class UsernameAvailabilityView(APIView):
+    """Check if username is available (real-time)"""
+    permission_classes = []  # Public endpoint
+
+    def get(self, request):
+        username = request.query_params.get("username", "").strip()
+        
+        if not username:
+            return Response({
+                "available": False,
+                "message": "Username is required"
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Case-insensitive check
+        exists = User.objects.filter(username__iexact=username).exists()
+        
+        return Response({
+            "available": not exists,
+            "message": "Available" if not exists else "Not available"
+        })
+
+
+class PasswordResetRequestView(APIView):
+    """Request password reset via email"""
+    permission_classes = []  # Public endpoint
+
+    def post(self, request):
+        email = request.data.get("email", "").strip().lower()
+        
+        if not email:
+            return Response(
+                {"error": "Email is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Validate Gmail
+        if not email.endswith('@gmail.com'):
+            return Response(
+                {"error": "Only Gmail addresses are allowed"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            # Don't reveal if email exists for security
+            return Response({
+                "message": "If the email exists, a password reset link has been sent."
+            })
+        
+        # Generate token
+        token = default_token_generator.make_token(user)
+        uid = urlsafe_base64_encode(force_bytes(user.pk))
+        
+        # Create reset link
+        reset_link = f"{settings.FRONTEND_URL or 'http://localhost:5173'}/password-reset/confirm?token={token}&uid={uid}"
+        
+        # Send email
+        try:
+            send_mail(
+                subject="Password Reset Request - PingMe",
+                message=f"Click the link to reset your password: {reset_link}",
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=False,
+            )
+        except Exception as e:
+            return Response(
+                {"error": "Failed to send email. Please try again later."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+        return Response({
+            "message": "If the email exists, a password reset link has been sent."
+        })
+
+
+class PasswordResetConfirmView(APIView):
+    """Confirm password reset with token"""
+    permission_classes = []  # Public endpoint
+
+    def post(self, request):
+        token = request.data.get("token")
+        uid = request.data.get("uid")
+        new_password = request.data.get("new_password")
+        
+        if not all([token, uid, new_password]):
+            return Response(
+                {"error": "Token, UID, and new password are required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if len(new_password) < 8:
+            return Response(
+                {"error": "Password must be at least 8 characters"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            user_id = force_str(urlsafe_base64_decode(uid))
+            user = User.objects.get(pk=user_id)
+        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+            return Response(
+                {"error": "Invalid reset link"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Verify token
+        if not default_token_generator.check_token(user, token):
+            return Response(
+                {"error": "Invalid or expired reset token"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Reset password
+        user.set_password(new_password)
+        user.save()
+        
+        return Response({
+            "message": "Password has been reset successfully"
+        })
 
 
 class MyProfileView(APIView):
@@ -136,4 +280,53 @@ class BlockUserView(APIView):
     def post(self, request, user_id):
         other = User.objects.get(id=user_id)
         request.user.blocked_users.add(other)
-        return Response({"status": "blocked"})        
+        return Response({"status": "blocked"})
+
+
+class UnblockUserView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, username):
+        try:
+            target = User.objects.get(username=username)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=404)
+        
+        request.user.blocked_users.remove(target)
+        return Response({"message": f"You unblocked {username}"})
+
+
+class FollowersListView(generics.ListAPIView):
+    """Get list of current user's followers"""
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return self.request.user.followers.all()
+    
+    def get_serializer_context(self):
+        return {"request": self.request}
+
+
+class FollowingListView(generics.ListAPIView):
+    """Get list of users current user is following"""
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return self.request.user.following.all()
+    
+    def get_serializer_context(self):
+        return {"request": self.request}
+
+
+class BlockedUsersListView(generics.ListAPIView):
+    """Get list of users current user has blocked"""
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return self.request.user.blocked_users.all()
+    
+    def get_serializer_context(self):
+        return {"request": self.request}        

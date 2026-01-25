@@ -1,5 +1,9 @@
 import { useEffect, useState, useRef } from "react";
 import api from "../api/axios";
+import { getCurrentUser } from "../api/auth.api";
+import { fetchThreads } from "../api/chat.api";
+import UserSearch from "../components/UserSearch";
+import Settings from "../pages/Settings";
 
 export default function ChatLayout() {
   const [threads, setThreads] = useState([]);
@@ -7,6 +11,8 @@ export default function ChatLayout() {
   const [loading, setLoading] = useState(false);
   const [messageInput, setMessageInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [filePreview, setFilePreview] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [searchText, setSearchText] = useState("");
@@ -14,7 +20,11 @@ export default function ChatLayout() {
   const [typingTimeout, setTypingTimeout] = useState(null);
   const [showMenu, setShowMenu] = useState(false);
   const [isFollowing, setIsFollowing] = useState(true);
-  const [theme, setTheme] = useState("light"); // light | dark
+  const [showSettings, setShowSettings] = useState(false);
+  const [theme, setTheme] = useState(() => {
+    // Load theme from localStorage on mount
+    return localStorage.getItem("theme") || "dark";
+  });
   const [showCallOptions, setShowCallOptions] = useState(false);
   const [callType, setCallType] = useState(null);
   const callSocketRef = useRef(null); 
@@ -28,6 +38,7 @@ export default function ChatLayout() {
   const remoteVideoRef = useRef(null);
   const localVideoRef = useRef(null);
   const [isVideoReady, setIsVideoReady] = useState(false);
+  const [selectedUserProfile, setSelectedUserProfile] = useState(null);
 
   const [isBlocked, setIsBlocked] = useState(() => {
     return localStorage.getItem("blocked") === "true";
@@ -37,6 +48,10 @@ export default function ChatLayout() {
     const saved = localStorage.getItem("active_thread");
     return saved ? JSON.parse(saved) : null;
   });
+  const [currentUser, setCurrentUser] = useState(null);
+  const [userSearchQuery, setUserSearchQuery] = useState("");
+  const [showAvatarPreview, setShowAvatarPreview] = useState(false);
+  
 
   const handleLogout = () => {
     // 🔐 Clear auth tokens
@@ -194,15 +209,35 @@ export default function ChatLayout() {
 
   // Fetch threads on mount
   useEffect(() => {
-    api.get("/chat/")
+    fetchThreads()
       .then((res) => {
         console.log("✅ Threads loaded:", res.data);
         setThreads(res.data);
       })
       .catch((err) => {
         console.error("❌ Thread fetch error:", err);
+        if (err.response?.status === 401) {
+          handleLogout();
+        }
       });
   }, []);
+
+  const handleThreadSelect = (thread) => {
+    setSelectedThread(thread);
+    localStorage.setItem("active_thread", JSON.stringify(thread));
+    setUserSearchQuery(""); // Clear search when thread is selected
+  };
+
+  const handleFollowUpdate = () => {
+    // Refresh threads after follow/unfollow
+    fetchThreads()
+      .then((res) => {
+        setThreads(res.data);
+      })
+      .catch((err) => {
+        console.error("Failed to refresh threads:", err);
+      });
+  };
 
   // Fetch messages when thread is selected
   useEffect(() => {
@@ -224,11 +259,6 @@ export default function ChatLayout() {
     }
   }, [selectedThread]);
 
-  const handleThreadClick = (thread) => {
-    console.log("🔍 Thread clicked:", thread);
-    setSelectedThread(thread);
-    localStorage.setItem("active_thread", JSON.stringify(thread));
-  };
 
   const formatTime = (date) => {
     const d = new Date(date);
@@ -254,8 +284,29 @@ export default function ChatLayout() {
     return '';
   };
 
-  // Get current user (adjust based on your auth setup)
-  const currentUser = "shaswat"; // Replace with actual current user logic
+  // Fetch current user on mount and when updated
+  const refreshCurrentUser = () => {
+    getCurrentUser()
+      .then((res) => {
+        setCurrentUser(res.data);
+      })
+      .catch((err) => {
+        console.error("Failed to fetch current user:", err);
+        // If auth fails, redirect to login
+        if (err.response?.status === 401) {
+          handleLogout();
+        }
+      });
+  };
+
+  useEffect(() => {
+    refreshCurrentUser();
+  }, []);
+
+  // Save theme to localStorage when it changes
+  useEffect(() => {
+    localStorage.setItem("theme", theme);
+  }, [theme]);
 
   const handleTyping = (e) => {
     setMessageInput(e.target.value);
@@ -443,26 +494,49 @@ export default function ChatLayout() {
 
   // Send message function
   const handleSendMessage = async () => {
-    if (!messageInput.trim() || !selectedThread || sending) return;
+    if ((!messageInput.trim() && !selectedFile) || !selectedThread || sending) return;
 
     const tempMessage = {
       id: Date.now(),
-      text: messageInput,
-      sender: { username: currentUser },
+      text: messageInput || "",
+      sender: { username: currentUser?.username || "You", id: currentUser?.id },
       created_at: new Date().toISOString(),
-      status: 'sending'
+      status: 'sending',
+      attachment: selectedFile ? {
+        name: selectedFile.name,
+        type: selectedFile.type,
+        preview: filePreview
+      } : null
     };
 
     // Optimistic UI update
     setMessages(prev => [...prev, tempMessage]);
+    const textToSend = messageInput;
+    const fileToSend = selectedFile;
     setMessageInput("");
+    setSelectedFile(null);
+    setFilePreview(null);
     setIsTyping(false);
     setSending(true);
 
     try {
-      const response = await api.post(`/chat/${selectedThread.id}/send/`, {
-        text: messageInput
-      });
+      let response;
+      
+      if (fileToSend) {
+        // Send with attachment
+        const formData = new FormData();
+        formData.append("file", fileToSend);
+        formData.append("text", textToSend || "");
+        
+        response = await api.post(`/chat/threads/${selectedThread.id}/media/`, formData, {
+          headers: { "Content-Type": "multipart/form-data" }
+        });
+      } else {
+        // Send text only
+        response = await api.post(`/chat/${selectedThread.id}/send/`, {
+          text: textToSend
+        });
+      }
       
       // Replace temp message with real one
       setMessages(prev => 
@@ -474,7 +548,7 @@ export default function ChatLayout() {
       console.error("❌ Failed to send message:", err);
       // Remove temp message on error
       setMessages(prev => prev.filter(msg => msg.id !== tempMessage.id));
-      alert("Failed to send message. Please try again.");
+      alert(err.response?.data?.error || "Failed to send message. Please try again.");
     } finally {
       setSending(false);
     }
@@ -537,6 +611,124 @@ export default function ChatLayout() {
   return (
     <>
       <audio ref={remoteAudioRef} autoPlay />
+
+      {selectedUserProfile && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="relative bg-[#0f172a] w-[420px] rounded-2xl p-6 shadow-2xl border border-slate-700">
+
+            {/* Close */}
+            <button
+              onClick={() => setSelectedUserProfile(null)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white text-xl"
+            >
+              ✕
+            </button>
+
+            {/* Avatar */}
+            <div className="flex flex-col items-center mt-2">
+              {selectedUserProfile.avatar ? (
+                <img
+                  src={
+                    selectedUserProfile.avatar.startsWith("http")
+                      ? selectedUserProfile.avatar
+                      : `http://127.0.0.1:8000${selectedUserProfile.avatar}`
+                  }
+                  onClick={() => setShowAvatarPreview(true)}
+                  className="w-28 h-28 rounded-full object-cover cursor-pointer hover:opacity-90 transition"
+                />
+              ) : (
+                <div className="w-28 h-28 rounded-full bg-gradient-to-br from-purple-600 to-pink-500 flex items-center justify-center text-4xl text-white font-bold">
+                  {selectedUserProfile.username[0].toUpperCase()}
+                </div>
+              )}
+
+              {/* Username */}
+              <h2 className="mt-4 text-xl font-bold text-white">
+                {selectedUserProfile.username}
+              </h2>
+
+              {/* Bio */}
+              <p className="mt-1 text-sm text-slate-400 text-center max-w-xs">
+                {selectedUserProfile.bio || "No bio available"}
+              </p>
+
+              {/* Stats */}
+              <div className="flex gap-8 mt-5 text-center">
+                <div>
+                  <p className="text-white font-semibold">
+                    {selectedUserProfile.posts_count || 0}
+                  </p>
+                  <p className="text-xs text-slate-400">Posts</p>
+                </div>
+                <div>
+                  <p className="text-white font-semibold">
+                    {selectedUserProfile.followers_count || 0}
+                  </p>
+                  <p className="text-xs text-slate-400">Followers</p>
+                </div>
+                <div>
+                  <p className="text-white font-semibold">
+                    {selectedUserProfile.following_count || 0}
+                  </p>
+                  <p className="text-xs text-slate-400">Following</p>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 mt-6 w-full">
+
+                {selectedUserProfile.is_following ? (
+                  <button
+                    onClick={() => handleUnfollow(selectedUserProfile)}
+                    className="flex-1 py-2 rounded-lg bg-slate-700 text-white font-semibold hover:bg-slate-600 transition"
+                  >
+                    Following
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleFollow(selectedUserProfile)}
+                    className="flex-1 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold hover:opacity-90 transition"
+                  >
+                    Follow
+                  </button>
+                )}
+
+                <button
+                  onClick={() => {
+                    setSelectedUserProfile(null);
+                    handleMessage(selectedUserProfile);
+                  }}
+                  className="flex-1 py-2 rounded-lg bg-slate-700 text-white font-semibold hover:bg-slate-600 transition"
+                >
+                  Message
+                </button>
+
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAvatarPreview && (
+        <div className="fixed inset-0 bg-black/90 z-[60] flex items-center justify-center">
+          
+          <button
+            onClick={() => setShowAvatarPreview(false)}
+            className="absolute top-6 right-6 text-white text-3xl"
+          >
+            ✕
+          </button>
+
+          <img
+            src={
+              selectedUserProfile.avatar.startsWith("http")
+                ? selectedUserProfile.avatar
+                : `http://127.0.0.1:8000${selectedUserProfile.avatar}`
+            }
+            className="max-w-[90%] max-h-[90%] object-contain rounded-xl"
+          />
+        </div>
+      )}
 
       {callStatus === "calling" && (
         <div style={{
@@ -618,29 +810,212 @@ export default function ChatLayout() {
         display: 'flex',
         height: '100vh',
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-        backgroundColor: theme === 'dark' ? '#0F172A' : '#F0F2F5',
+        backgroundColor: theme === 'dark' ? '#020617' : '#F0F2F5',
         color: theme === "dark" ? "#E5E7EB" : "#000"
       }}>
+        {/* Settings Modal */}
+        {showSettings && (
+          <Settings
+            onClose={() => setShowSettings(false)}
+            theme={theme}
+            setTheme={setTheme}
+            onUserUpdate={(updatedUser) => {
+              setCurrentUser(updatedUser);
+              // Also refresh to ensure we have latest data
+              refreshCurrentUser();
+            }}
+          />
+        )}
+
         {/* SIDEBAR */}
         <div style={{
           width: '360px',
-          backgroundColor: theme === "dark" ? "#020617" : "#F8F9FA",
+          backgroundColor: theme === "dark" ? "#020617" : "#FFFFFF",
           borderRight: theme === "dark" ? "1px solid #1E293B" : "1px solid #E4E6EB",
           display: 'flex',
           flexDirection: 'column'
         }}>
           {/* Sidebar Header */}
           <div style={{
-            padding: '20px 16px',
+            padding: '14px 16px',
             borderBottom: theme === "dark" ? "1px solid #1E293B": "1px solid #E4E6EB",
             backgroundColor: theme === "dark" ? "#020617" : "#FFFFFF",
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '12px',
           }}>
-            <h2 style={{ 
-              margin: 0, 
-              fontSize: '20px', 
-              fontWeight: 700,
-              color: theme === "dark" ? "#E5E7EB" : "#1C1E21",
-            }}>Chats</h2>
+            {/* User Info */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              flex: 1,
+              minWidth: 0, // Allow truncation
+            }}>
+              {currentUser && (
+                <>
+                  {/* Avatar */}
+                  {(() => {
+                    const avatarUrl = currentUser.avatar_url || 
+                      (currentUser.avatar ? 
+                        (currentUser.avatar.startsWith('http') ? currentUser.avatar : `http://127.0.0.1:8000${currentUser.avatar}`) 
+                        : null);
+                    
+                    return avatarUrl ? (
+                      <img
+                        key={avatarUrl} // Force re-render when URL changes
+                        src={avatarUrl}
+                        alt={currentUser.username}
+                        style={{
+                          width: '36px',
+                          height: '36px',
+                          borderRadius: '50%',
+                          objectFit: 'cover',
+                          border: `2px solid ${theme === "dark" ? "#475569" : "#E2E8F0"}`,
+                          flexShrink: 0,
+                        }}
+                        onError={(e) => {
+                          // Hide image and show initials on error
+                          e.target.style.display = 'none';
+                        }}
+                      />
+                    ) : null;
+                  })()}
+                  {(!currentUser.avatar_url && !currentUser.avatar) && (
+                    <div style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '50%',
+                      background: 'linear-gradient(to bottom right, #9333EA, #EC4899)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#FFFFFF',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      flexShrink: 0,
+                    }}>
+                      {getInitials(currentUser.username)}
+                    </div>
+                  )}
+                  {/* Username */}
+                  <div style={{
+                    flex: 1,
+                    minWidth: 0,
+                  }}>
+                    <div style={{
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      color: theme === "dark" ? "#E5E7EB" : "#1C1E21",
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}>
+                      {currentUser.username}
+                    </div>
+                    <div style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      fontSize: "13px",
+                      fontWeight: 500,
+                      color: "#22c55e",
+                    }}>
+                       <span
+                          style={{
+                            width: "7px",
+                            height: "7px",
+                            borderRadius: "50%",
+                            backgroundColor: "#22c55e",
+                            display: "inline-block",
+                            boxShadow: "0 0 6px rgba(34,197,94,0.8)", // glow
+                          }}
+                        />    
+
+                      Online
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+            
+            {/* Settings Button */}
+            <button
+              onClick={() => setShowSettings(true)}
+              title="Settings"
+              style={{
+                width: '36px',
+                height: '36px',
+                minWidth: '36px',
+                borderRadius: '50%',
+                border: 'none',
+                backgroundColor: 'transparent',
+                color: theme === "dark" ? "#E5E7EB" : "#1C1E21",
+                cursor: 'pointer',
+                fontSize: '20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'background-color 0.15s',
+                flexShrink: 0,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = theme === "dark" ? "#1E293B" : "#E4E6EB";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+            >
+              ⚙️
+            </button>
+          </div>
+
+          {/* User Search */}
+          <div style={{
+            padding: '12px 16px',
+            borderBottom: theme === "dark" ? "1px solid #1E293B": "1px solid #E4E6EB",
+            backgroundColor: theme === "dark" ? "#020617" : "#FFFFFF",
+            position: 'relative',
+          }}>
+            <div style={{ position: 'relative' }}>
+              <input
+                type="text"
+                placeholder="Search users..."
+                value={userSearchQuery}
+                onChange={(e) => setUserSearchQuery(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px 10px 36px',
+                  backgroundColor: theme === "dark" ? "#1E293B" : "#F0F2F5",
+                  border: 'none',
+                  borderRadius: '20px',
+                  fontSize: '14px',
+                  color: theme === "dark" ? "#E5E7EB" : "#1C1E21",
+                  outline: 'none',
+                }}
+              />
+              <span style={{
+                position: 'absolute',
+                left: '12px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                fontSize: '16px',
+                color: theme === "dark" ? "#64748B" : "#9CA3AF",
+              }}>🔍</span>
+            </div>
+            {userSearchQuery.trim().length >= 2 && (
+              <UserSearch
+                searchQuery={userSearchQuery}
+                onThreadSelect={handleThreadSelect}
+                currentUser={currentUser}
+                onFollowUpdate={handleFollowUpdate}
+                onUserClick={(user) => {
+                  setSelectedUserProfile(user);
+                  setSelectedThread(null);
+                }}  
+              />
+            )}
           </div>
 
           {/* Thread List */}
@@ -649,20 +1024,30 @@ export default function ChatLayout() {
               <div style={{
                 padding: '40px 20px',
                 textAlign: 'center',
-                color: '#65676B'
+                color: theme === "dark" ? "#94A3B8" : "#65676B"
               }}>
                 <div style={{ fontSize: '48px', marginBottom: '16px' }}>💬</div>
-                <div style={{ fontSize: '15px' }}>No chats yet</div>
+                <div style={{ fontSize: '15px', fontWeight: 500, marginBottom: '8px' }}>
+                  No chats yet
+                </div>
+                <div style={{ fontSize: '13px', color: theme === "dark" ? "#64748B" : "#9CA3AF" }}>
+                  Search for users above and follow them to start chatting
+                </div>
               </div>
             ) : (
-              threads.map((thread) => (
+              threads.map((thread) => {
+                // Get other user from thread members
+                const otherUser = thread.members?.find(m => m.id !== currentUser?.id);
+                const threadName = otherUser?.username || thread.name || "Direct Chat";
+                
+                return (
                 <div
                   key={thread.id}
-                  onClick={() => handleThreadClick(thread)}
+                  onClick={() => handleThreadSelect(thread)}
                   style={{
                     padding: '12px 16px',
                     cursor: 'pointer',
-                    backgroundColor: selectedThread?.id === thread.id ? '#E4F2FF' : 'transparent',
+                    backgroundColor: selectedThread?.id === thread.id ? theme === "dark" ? "#1E293B" : "#E4F2FF" : "transparent",
                     borderLeft: selectedThread?.id === thread.id ? '4px solid #0084FF' : '4px solid transparent',
                     transition: 'all 0.15s ease',
                     display: 'flex',
@@ -685,16 +1070,49 @@ export default function ChatLayout() {
                     width: '48px',
                     height: '48px',
                     borderRadius: '50%',
-                    backgroundColor: '#0084FF',
-                    color: '#FFFFFF',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '16px',
-                    fontWeight: 600,
-                    flexShrink: 0
+                    position: 'relative',
+                    flexShrink: 0,
                   }}>
-                    {getInitials(thread.name || "Direct Chat")}
+                    {otherUser?.avatar_url ? (
+                      <img
+                        src={otherUser.avatar_url}
+                        alt={otherUser.username}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          borderRadius: '50%',
+                          objectFit: 'cover',
+                        }}
+                      />
+                    ) : (
+                      <div style={{
+                        width: '100%',
+                        height: '100%',
+                        borderRadius: '50%',
+                        background: 'linear-gradient(135deg, #6366f1, #ec4899)',
+                        color: '#fff',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontWeight: 600,
+                        fontSize: '16px',
+                      }}>
+                        {getInitials(otherUser?.username)}
+                      </div>
+                    )}
+
+                    {otherUser?.is_online && (
+                      <span style={{
+                        position: 'absolute',
+                        bottom: 2,
+                        right: 2,
+                        width: 10,
+                        height: 10,
+                        background: '#22c55e',
+                        borderRadius: '50%',
+                        border: '2px solid #020617',
+                      }} />
+                    )}
                   </div>
 
                   {/* Content */}
@@ -709,7 +1127,7 @@ export default function ChatLayout() {
                         fontSize: '15px',
                         fontWeight: selectedThread?.id === thread.id ? 700 : 500,
                         color: selectedThread?.id === thread.id
-                        ? '#0F172A' 
+                        ? (theme === 'dark' ? '#E5E7EB' : '#0F172A')
                         : (theme === 'dark'
                             ? '#94A3B8'
                             : '#374151'),     
@@ -718,7 +1136,7 @@ export default function ChatLayout() {
                         overflow: 'hidden',
                         textOverflow: 'ellipsis'
                       }}>
-                        {thread.name || "Direct Chat"}
+                        {threadName}
                       </span>
                       {thread.updated_at && (
                         <span style={{
@@ -763,13 +1181,14 @@ export default function ChatLayout() {
                     </div>
                   </div>
                 </div>
-              ))
+              );
+              })
             )}
           </div>
         </div>
 
         {/* MAIN CHAT AREA */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#FFFFFF' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: theme === "dark" ? "#020617" : "#FFFFFF" }}>
           {selectedThread ? (
             <>
               {/* Chat Header */}
@@ -795,7 +1214,11 @@ export default function ChatLayout() {
                   fontWeight: 600,
                   position: 'relative'
                 }}>
-                  {getInitials(selectedThread.name || "Direct Chat")}
+                  {(() => {
+                    const otherUser = selectedThread.members?.find(m => m.id !== currentUser?.id);
+                    const threadName = otherUser?.username || selectedThread.name || "Direct Chat";
+                    return getInitials(threadName);
+                  })()}
                   <div style={{
                     width: '12px',
                     height: '12px',
@@ -814,7 +1237,10 @@ export default function ChatLayout() {
                     fontWeight: 600,
                     color: theme === "dark" ? "#E5E7EB" : "#1C1E21",
                   }}>
-                    {selectedThread.name || "Direct Chat"}
+                    {(() => {
+                      const otherUser = selectedThread.members?.find(m => m.id !== currentUser?.id);
+                      return otherUser?.username || selectedThread.name || "Direct Chat";
+                    })()}
                   </div>
                   <div style={{
                     fontSize: '13px',
@@ -980,6 +1406,20 @@ export default function ChatLayout() {
                     }}>
                       <div
                         onClick={() => {
+                          setShowSettings(true);
+                          setShowMenu(false);
+                        }}
+                        style={{
+                          padding: "10px 14px",
+                          cursor: "pointer",
+                          fontSize: 14,
+                          borderBottom: theme === "dark" ? "1px solid #1E293B" : "1px solid #ddd"
+                        }}
+                      >
+                        ⚙️ Settings
+                      </div>
+                      <div
+                        onClick={() => {
                           setTheme(prev => prev === "dark" ? "light" : "dark");
                           setShowMenu(false);
                         }}
@@ -1014,14 +1454,6 @@ export default function ChatLayout() {
                         }}
                       />
 
-                      {/* 🔥 LOGOUT */}
-                      <MenuItem
-                        label="🚪 Logout"
-                        onClick={() => {
-                          setShowMenu(false);
-                          handleLogout();
-                        }}
-                      />  
                     </div>
                   )}
                 </div>
@@ -1157,7 +1589,7 @@ export default function ChatLayout() {
                   </div>
                 ) : (
                   filteredMessages.map((msg, idx) => {
-                    const isOwn = msg.sender.username === currentUser;
+                    const isOwn = msg.sender?.username === currentUser?.username || msg.sender?.id === currentUser?.id;
                     const prevMsg = messages[idx - 1];
                     const showAvatar = !prevMsg || prevMsg.sender.username !== msg.sender.username;
 
@@ -1201,15 +1633,83 @@ export default function ChatLayout() {
                             backgroundColor: isOwn ? "#2563EB" : theme === "dark" ? "#1E293B" : "#E4E6EB",
                             color: isOwn ? '#FFFFFF' : theme === "dark" ? "#FFFFFF" : "#000000",
                             wordWrap: 'break-word',
-                            position: 'relative'
+                            position: 'relative',
+                            maxWidth: '400px'
                           }}>
-                            <div style={{
-                              fontSize: '14px',
-                              lineHeight: '1.5',
-                              marginBottom: '2px'
-                            }}>
-                              {msg.text}
-                            </div>
+                            {/* Attachment */}
+                            {msg.attachment && (
+                              <div style={{ marginBottom: msg.text ? '8px' : '0' }}>
+                                {msg.is_media && msg.file_type?.startsWith('image/') ? (
+                                  <a
+                                    href={msg.attachment}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{ display: 'block' }}
+                                  >
+                                    <img
+                                      src={msg.attachment}
+                                      alt="Attachment"
+                                      style={{
+                                        maxWidth: '100%',
+                                        maxHeight: '300px',
+                                        borderRadius: '8px',
+                                        objectFit: 'cover',
+                                        cursor: 'pointer',
+                                      }}
+                                    />
+                                  </a>
+                                ) : (
+                                  <a
+                                    href={msg.attachment}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{
+                                      padding: '12px',
+                                      backgroundColor: isOwn ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+                                      borderRadius: '8px',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '8px',
+                                      textDecoration: 'none',
+                                      color: 'inherit',
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    <span style={{ fontSize: '20px' }}>📄</span>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                      <div style={{
+                                        fontSize: '13px',
+                                        fontWeight: 500,
+                                        whiteSpace: 'nowrap',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                      }}>
+                                        {msg.file_name || 'File'}
+                                      </div>
+                                      {msg.file_size && (
+                                        <div style={{
+                                          fontSize: '11px',
+                                          opacity: 0.8,
+                                        }}>
+                                          {(msg.file_size / 1024 / 1024).toFixed(2)} MB
+                                        </div>
+                                      )}
+                                    </div>
+                                  </a>
+                                )}
+                              </div>
+                            )}
+                            
+                            {/* Text */}
+                            {msg.text && (
+                              <div style={{
+                                fontSize: '14px',
+                                lineHeight: '1.5',
+                                marginBottom: '2px'
+                              }}>
+                                {msg.text}
+                              </div>
+                            )}
                             <div style={{
                               fontSize: '11px',
                               color: isOwn ? 'rgba(255,255,255,0.8)' : '#65676B',
@@ -1248,6 +1748,83 @@ export default function ChatLayout() {
 
               
 
+              {/* File Preview */}
+              {selectedFile && (
+                <div style={{
+                  padding: '12px 20px',
+                  borderTop: '1px solid #E4E6EB',
+                  backgroundColor: theme === "dark" ? "#0F172A" : "#FFFFFF",
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                }}>
+                  {filePreview ? (
+                    <img
+                      src={filePreview}
+                      alt="Preview"
+                      style={{
+                        width: '60px',
+                        height: '60px',
+                        objectFit: 'cover',
+                        borderRadius: '8px',
+                      }}
+                    />
+                  ) : (
+                    <div style={{
+                      width: '60px',
+                      height: '60px',
+                      backgroundColor: theme === "dark" ? "#1E293B" : "#E4E6EB",
+                      borderRadius: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '24px',
+                    }}>
+                      📄
+                    </div>
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: '14px',
+                      fontWeight: 500,
+                      color: theme === "dark" ? "#E5E7EB" : "#1C1E21",
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}>
+                      {selectedFile.name}
+                    </div>
+                    <div style={{
+                      fontSize: '12px',
+                      color: theme === "dark" ? "#94A3B8" : "#64748B",
+                    }}>
+                      {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setSelectedFile(null);
+                      setFilePreview(null);
+                    }}
+                    style={{
+                      width: '28px',
+                      height: '28px',
+                      borderRadius: '50%',
+                      border: 'none',
+                      backgroundColor: theme === "dark" ? "#1E293B" : "#E4E6EB",
+                      color: theme === "dark" ? "#E5E7EB" : "#1C1E21",
+                      cursor: 'pointer',
+                      fontSize: '16px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
               {/* Input Area */}
               <div style={{
                 padding: '16px 20px',
@@ -1282,21 +1859,40 @@ export default function ChatLayout() {
                   onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                 >
                   📎
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    hidden
-                    onChange={(e) => {
-                      const file = e.target.files[0];
-                      if (!file) return;
-
-                      console.log("📎 Selected file:", file);
-                      alert(`Selected file: ${file.name}`);
-
-                      // future: yahin se API call hogi
-                    }}
-                  />
                 </button>
+
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept="image/*,video/*,application/pdf"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+
+                    // Validate file size (10MB)
+                    if (file.size > 10 * 1024 * 1024) {
+                      alert("File size must be less than 10MB");
+                      e.target.value = "";
+                      return;
+                    }
+
+                    setSelectedFile(file);
+
+                    // Create preview for images
+                    if (file.type.startsWith("image/")) {
+                      const reader = new FileReader();
+                      reader.onloadend = () => {
+                        setFilePreview(reader.result);
+                      };
+                      reader.readAsDataURL(file);
+                    } else {
+                      setFilePreview(null);
+                    }
+
+                    e.target.value = "";
+                  }}
+                />
 
                 <input
                   type="text"
@@ -1399,8 +1995,8 @@ export default function ChatLayout() {
 
                 {messageInput.trim() && (
                   <button 
-                    onClick={handleSendMessage}
-                    disabled={sending || isBlocked}
+                  onClick={handleSendMessage}
+                  disabled={(sending || isBlocked) || (!messageInput.trim() && !selectedFile)}
                     title="Send message"
                     style={{
                       width: '36px',

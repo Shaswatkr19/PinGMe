@@ -242,12 +242,12 @@ export default function Login() {
                 </div>
                 <span className="text-gray-300 text-xs sm:text-sm font-medium group-hover:text-white transition">Keep me signed in</span>
               </label>
-              <button className="text-purple-400 hover:text-purple-300 text-xs sm:text-sm font-semibold transition flex items-center gap-1 group">
+              <Link to="/password-reset" className="text-purple-400 hover:text-purple-300 text-xs sm:text-sm font-semibold transition flex items-center gap-1 group">
                 <span>Forgot?</span>
                 <svg className="w-3 h-3 sm:w-4 sm:h-4 transform group-hover:translate-x-1 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
-              </button>
+              </Link>
             </div>
 
             {/* Login Button - Mobile optimized */}
@@ -315,9 +315,9 @@ export default function Login() {
         <div className="text-center mt-6 sm:mt-8">
           <p className="text-gray-400 text-xs sm:text-sm">
             New to PingMe?{' '}
-            <button className="text-transparent bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text font-bold hover:from-purple-300 hover:to-pink-300 transition">
+            <Link to="/register" className="text-transparent bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text font-bold hover:from-purple-300 hover:to-pink-300 transition">
               Create your account
-            </button>
+            </Link>
           </p>
         </div>
 

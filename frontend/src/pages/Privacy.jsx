@@ -1,18 +1,28 @@
-import { MessageCircle, Shield, Lock, Eye, Database, FileCheck } from 'lucide-react';
+import { MessageCircle, Shield, Lock, Eye, Database, FileCheck, ArrowLeft } from 'lucide-react';
 
 export default function Privacy() {
   return (
     <div className="min-h-screen bg-[#020617] text-gray-200">
       {/* Header */}
-      <header className="border-b border-gray-800 bg-[#0a0f1e]">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <MessageCircle className="w-8 h-8 text-purple-500" />
-            <span className="text-2xl font-bold">PingMe</span>
-          </div>
-        </div>
-      </header>
+     <header className="h-16 border-b border-gray-800 bg-[#0a0f1e] flex items-center">
+        <div className="w-full px-6 flex items-center gap-4">
+            
+            {/* Back button */}
+            <button
+                onClick={() => window.history.back()}
+                className="p-2 hover:bg-gray-800 rounded-lg transition"
+            >
+                <ArrowLeft className="w-5 h-5 text-gray-400" />
+            </button>
 
+            {/* Logo */}
+            <div className="flex items-center gap-2 text-xl font-semibold">
+            <MessageCircle className="w-6 h-6 text-purple-500" />
+            PingMe
+            </div>
+
+        </div>
+    </header>
       {/* Hero Section */}
       <section className="max-w-4xl mx-auto px-6 py-16">
         <div className="flex items-center gap-3 mb-6">
@@ -25,7 +35,7 @@ export default function Privacy() {
           Your privacy is our top priority. Learn how we protect your data and 
           respect your rights while using PingMe.
         </p>
-        <p className="text-sm text-gray-500 mt-4">Last Updated: January 2024</p>
+        <p className="text-sm text-gray-500 mt-4">Last Updated: January 2026</p>
       </section>
 
       {/* Privacy Features */}
@@ -143,18 +153,21 @@ export default function Privacy() {
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="border-t border-gray-800 mt-16">
-        <div className="max-w-6xl mx-auto px-6 py-8">
-          <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-            <div className="flex items-center gap-2">
-              <MessageCircle className="w-6 h-6 text-purple-500" />
-              <span className="font-semibold">PingMe</span>
-            </div>
-            <p className="text-gray-500 text-sm">
-              © 2024 PingMe. All rights reserved.
-            </p>
+    {/* Footer */}
+    <footer className="h-16 border-t border-gray-800 flex items-center">
+        <div className="w-full px-6 flex justify-between text-sm text-gray-500">
+          
+          {/* Left */}
+          <div className="flex items-center gap-2 text-gray-400">
+            <MessageCircle className="w-5 h-5 text-purple-500" />
+            <span className="font-medium">PingMe</span>
           </div>
+
+          {/* Right */}
+          <p className="text-sm text-gray-500">
+            © 2026 PingMe · All rights reserved
+          </p>
+
         </div>
       </footer>
     </div>

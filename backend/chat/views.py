@@ -59,7 +59,14 @@ class CreateThreadView(generics.CreateAPIView):
             other_user in request.user.blocked_users.all()
             or request.user in other_user.blocked_users.all()
         ):
-            return Response({"error": "User blocked"}, status=403)    
+            return Response({"error": "User blocked"}, status=403)
+        
+        # Check if user follows the other user
+        if other_user not in request.user.following.all():
+            return Response(
+                {"error": "You must follow this user to start a chat"},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         thread = Thread.objects.filter(
             members=request.user
@@ -114,6 +121,9 @@ class MessageListView(generics.ListAPIView):
             msg.read_by.add(user)
 
         return messages
+    
+    def get_serializer_context(self):
+        return {"request": self.request}
 
 
 # -----------------------------
@@ -122,6 +132,9 @@ class MessageListView(generics.ListAPIView):
 class SendMessageView(generics.CreateAPIView):
     serializer_class = MessageSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_serializer_context(self):
+        return {"request": self.request}
 
     def perform_create(self, serializer):
         thread_id = self.kwargs.get("thread_id")
@@ -151,6 +164,17 @@ class SendMessageView(generics.CreateAPIView):
 
         # sender ne khud ka message read kiya hua hota hai
         message.read_by.add(self.request.user)
+        
+        # Broadcast via WebSocket
+        channel_layer = get_channel_layer()
+        message_serializer = MessageSerializer(message, context={"request": self.request})
+        async_to_sync(channel_layer.group_send)(
+            f"chat_{thread.id}",
+            {
+                "type": "chat_message",
+                "message": message_serializer.data
+            }
+        )
 
 
 class MediaMessageUploadView(APIView):
@@ -213,6 +237,9 @@ class MediaMessageUploadView(APIView):
             message,
             context={"request": request}
         )
+        
+        # Mark as read by sender
+        message.read_by.add(user)
 
         # 6️⃣ WEBSOCKET BROADCAST
         channel_layer = get_channel_layer()
