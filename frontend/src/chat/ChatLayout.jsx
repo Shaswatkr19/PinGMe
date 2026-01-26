@@ -51,6 +51,9 @@ export default function ChatLayout() {
   const [currentUser, setCurrentUser] = useState(null);
   const [userSearchQuery, setUserSearchQuery] = useState("");
   const [showAvatarPreview, setShowAvatarPreview] = useState(false);
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState(null);
+  
+
   
 
   const handleLogout = () => {
@@ -570,43 +573,79 @@ export default function ChatLayout() {
     setShowEmojiPicker(false);
   };
 
+  const chatSocketRef = useRef(null);
+
   useEffect(() => {
-  if (!selectedThread) return;
-
-  const token = localStorage.getItem("access");
-  if (!token) {
-    console.error("❌ No JWT token");
-    return;
-  }
-
-  console.log("📡 Connecting call socket for thread", selectedThread.id);
-
-  const wsUrl = `ws://127.0.0.1:8000/ws/call/${selectedThread.id}/?token=${token}`;
-  const ws = new WebSocket(wsUrl);
-
-  ws.onopen = () => {
-    console.log("📞 Call WS connected");
-  };
-
-  ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    handleCallSignal(msg);
-  };
-
-  ws.onclose = () => {
-    console.log("📞 Call WS closed");
-    cleanupCall();
-  };
-
-  ws.onerror = (e) => {
-    console.error("❌ Call WS error", e);
-  };
-
-  callSocketRef.current = ws;
-
-  return () => ws.close();
-}, [selectedThread]);
+    if (!selectedThread?.id) return;
   
+    // 🚫 already connected? STOP
+    if (chatSocketRef.current) {
+      console.log("⛔ Chat WS already exists, skipping");
+      return;
+    }
+  
+    const token = localStorage.getItem("access");
+    if (!token) return;
+  
+    const ws = new WebSocket(
+      `ws://127.0.0.1:8000/ws/chat/${selectedThread.id}/?token=${token}`
+    );
+  
+    chatSocketRef.current = ws;
+  
+    ws.onopen = () => {
+      console.log("💬 Chat WS connected");
+    };
+  
+    ws.onmessage = (e) => {
+      const data = JSON.parse(e.data);
+  
+      if (data.type === "presence") {
+        const { user_id, is_online } = data;
+  
+        setThreads(prev =>
+          prev.map(thread =>
+            thread.id !== selectedThread.id
+              ? thread
+              : {
+                  ...thread,
+                  members: thread.members.map(m =>
+                    m.id === user_id ? { ...m, is_online } : m
+                  )
+                }
+          )
+        );
+  
+        setSelectedThread(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            members: prev.members.map(m =>
+              m.id === user_id ? { ...m, is_online } : m
+            )
+          };
+        });
+      }
+  
+      if (data.type === "message") {
+        setMessages(prev => [...prev, data]);
+      }
+    };
+  
+    ws.onclose = () => {
+      console.log("💬 Chat WS closed");
+      chatSocketRef.current = null;
+    };
+  
+    ws.onerror = (e) => {
+      console.error("❌ Chat WS error", e);
+    };
+  
+    return () => {
+      ws.close();
+      chatSocketRef.current = null;
+    };
+  }, [selectedThread?.id]); // ⚠️ ONLY id
 
   return (
     <>
@@ -626,14 +665,22 @@ export default function ChatLayout() {
 
             {/* Avatar */}
             <div className="flex flex-col items-center mt-2">
-              {selectedUserProfile.avatar ? (
+              {selectedUserProfile?.avatar || selectedUserProfile?.avatar_url ? (
                 <img
-                  src={
-                    selectedUserProfile.avatar.startsWith("http")
+                src={
+                  (selectedUserProfile.avatar || selectedUserProfile.avatar_url).startsWith("http")
+                    ? (selectedUserProfile.avatar || selectedUserProfile.avatar_url)
+                    : `http://127.0.0.1:8000${selectedUserProfile.avatar}`
+                }
+                onClick={() => {
+                  const url =
+                    selectedUserProfile.avatar?.startsWith("http")
                       ? selectedUserProfile.avatar
-                      : `http://127.0.0.1:8000${selectedUserProfile.avatar}`
-                  }
-                  onClick={() => setShowAvatarPreview(true)}
+                      : `http://127.0.0.1:8000${selectedUserProfile.avatar}`;
+                
+                  setAvatarPreviewUrl(url);
+                  setShowAvatarPreview(true);
+                }}
                   className="w-28 h-28 rounded-full object-cover cursor-pointer hover:opacity-90 transition"
                 />
               ) : (
@@ -709,7 +756,7 @@ export default function ChatLayout() {
         </div>
       )}
 
-      {showAvatarPreview && (
+      {showAvatarPreview && avatarPreviewUrl && (
         <div className="fixed inset-0 bg-black/90 z-[60] flex items-center justify-center">
           
           <button
@@ -720,11 +767,7 @@ export default function ChatLayout() {
           </button>
 
           <img
-            src={
-              selectedUserProfile.avatar.startsWith("http")
-                ? selectedUserProfile.avatar
-                : `http://127.0.0.1:8000${selectedUserProfile.avatar}`
-            }
+            src={avatarPreviewUrl}
             className="max-w-[90%] max-h-[90%] object-contain rounded-xl"
           />
         </div>
@@ -1037,8 +1080,14 @@ export default function ChatLayout() {
             ) : (
               threads.map((thread) => {
                 // Get other user from thread members
-                const otherUser = thread.members?.find(m => m.id !== currentUser?.id);
-                const threadName = otherUser?.username || thread.name || "Direct Chat";
+                const otherUser = thread.members?.find(
+                  m => m.id !== currentUser?.id
+                );
+                const threadName =
+                otherUser?.username ||
+                selectedThread?.name ||
+                "Direct Chat";
+                
                 
                 return (
                 <div
@@ -1066,13 +1115,26 @@ export default function ChatLayout() {
                   }}
                 >
                   {/* Avatar */}
-                  <div style={{
-                    width: '48px',
-                    height: '48px',
-                    borderRadius: '50%',
-                    position: 'relative',
-                    flexShrink: 0,
-                  }}>
+                  <div 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!otherUser?.avatar_url) return;
+
+                      const url = otherUser.avatar_url.startsWith("http")
+                        ? otherUser.avatar_url
+                        : `http://127.0.0.1:8000${otherUser.avatar_url}`;
+
+                      setAvatarPreviewUrl(url);
+                      setShowAvatarPreview(true);
+                    }}  
+                    style={{
+                      width: '48px',
+                      height: '48px',
+                      borderRadius: '50%',
+                      cursor: 'pointer',
+                      position: 'relative',
+                      flexShrink: 0,
+                    }}>
                     {otherUser?.avatar_url ? (
                       <img
                         src={otherUser.avatar_url}
@@ -1192,63 +1254,107 @@ export default function ChatLayout() {
           {selectedThread ? (
             <>
               {/* Chat Header */}
-              <div style={{
-                padding: '16px 20px',
-                backgroundColor: theme === "dark" ? "#020617" : "#FFFFFF", 
-                borderBottom: theme === "dark" ? "1px solid #1E293B" : "1px solid #E4E6EB",
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-                boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
-              }}>
-                <div style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '50%',
-                  backgroundColor: '#0084FF',
-                  color:  theme === "dark" ? "#94A3B8" : "#00A884",
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '16px',
-                  fontWeight: 600,
-                  position: 'relative'
-                }}>
-                  {(() => {
-                    const otherUser = selectedThread.members?.find(m => m.id !== currentUser?.id);
-                    const threadName = otherUser?.username || selectedThread.name || "Direct Chat";
-                    return getInitials(threadName);
-                  })()}
-                  <div style={{
-                    width: '12px',
-                    height: '12px',
-                    borderRadius: '50%',
-                    backgroundColor: '#00A884',
-                    border: '2px solid #FFFFFF',
-                    position: 'absolute',
-                    bottom: '0',
-                    right: '0'
-                  }} />
-                </div>
+              <div
+                style={{
+                  padding: "16px 20px",
+                  backgroundColor: theme === "dark" ? "#020617" : "#FFFFFF",
+                  borderBottom: theme === "dark"
+                    ? "1px solid #1E293B"
+                    : "1px solid #E4E6EB",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "12px",
+                }}
+              >
+                {/* LEFT: avatar + name + status (FULL CLICKABLE) */}
+                {(() => {
+                  const otherUser = selectedThread?.members?.find(
+                    (m) => m.id !== currentUser?.id
+                  );
+                  if (!otherUser) return null;
 
-                <div style={{ flex: 1 }}>
-                  <div style={{
-                    fontSize: '16px',
-                    fontWeight: 600,
-                    color: theme === "dark" ? "#E5E7EB" : "#1C1E21",
-                  }}>
-                    {(() => {
-                      const otherUser = selectedThread.members?.find(m => m.id !== currentUser?.id);
-                      return otherUser?.username || selectedThread.name || "Direct Chat";
-                    })()}
-                  </div>
-                  <div style={{
-                    fontSize: '13px',
-                    color: "dark" ? "#94A3B8" : "#00A884",
-                  }}>
-                    Active now
-                  </div>
-                </div>
+                  return (
+                    <div
+                    onClick={() => {
+                      setSelectedUserProfile(otherUser);
+                    }}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "12px",
+                        cursor: "pointer",
+                        flex: 1,
+                      }}
+                    >
+                      {/* Avatar */}
+                      <div style={{ width: 40, height: 40, position: "relative" }}>
+                        {otherUser.avatar_url ? (
+                          <img
+                            src={otherUser.avatar_url}
+                            alt={otherUser.username}
+                            style={{
+                              width: "100%",
+                              height: "100%",
+                              borderRadius: "50%",
+                              objectFit: "cover",
+                            }}
+                          />
+                        ) : (
+                          <div
+                            style={{
+                              width: "100%",
+                              height: "100%",
+                              borderRadius: "50%",
+                              background:
+                                "linear-gradient(135deg,#6366f1,#ec4899)",
+                              color: "#fff",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontWeight: 600,
+                            }}
+                          >
+                            {otherUser.username[0].toUpperCase()}
+                          </div>
+                        )}
+
+                        {otherUser.is_online && (
+                          <span
+                            style={{
+                              position: "absolute",
+                              bottom: 0,
+                              right: 0,
+                              width: 10,
+                              height: 10,
+                              background: "#22c55e",
+                              borderRadius: "50%",
+                              border: "2px solid #020617",
+                            }}
+                          />
+                        )}
+                      </div>
+
+                      {/* Name + status */}
+                      <div>
+                        <div
+                          style={{
+                            fontSize: 16,
+                            fontWeight: 600,
+                            color:
+                              theme === "dark" ? "#E5E7EB" : "#1C1E21",
+                          }}
+                        >
+                          {otherUser.username}
+                        </div>
+                        <div style={{ fontSize: '13px', color: otherUser?.is_online ? "#22c55e" : "#94A3B8", }}>
+                          {otherUser.is_online ? "Active now" : "Offline"}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+  
 
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <button
@@ -1589,9 +1695,16 @@ export default function ChatLayout() {
                   </div>
                 ) : (
                   filteredMessages.map((msg, idx) => {
-                    const isOwn = msg.sender?.username === currentUser?.username || msg.sender?.id === currentUser?.id;
-                    const prevMsg = messages[idx - 1];
-                    const showAvatar = !prevMsg || prevMsg.sender.username !== msg.sender.username;
+                    const otherUser = selectedThread?.members?.find(
+                      m => m.id !== currentUser?.id
+                    );
+                    const isOwn =
+                      msg.sender?.id === currentUser?.id;
+
+                    const prevMsg = filteredMessages[idx - 1];
+                    const showAvatar =
+                      !isOwn &&
+                      (!prevMsg || prevMsg.sender?.id !== msg.sender?.id);
 
                     return (
                       <div
@@ -1613,29 +1726,52 @@ export default function ChatLayout() {
                               width: '28px',
                               height: '28px',
                               borderRadius: '50%',
-                              backgroundColor: '#E4E6EB',
-                              fontSize: '11px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              visibility: showAvatar ? 'visible' : 'hidden',
                               flexShrink: 0,
-                              fontWeight: 600,
-                              color: '#65676B'
+                              visibility: showAvatar ? 'visible' : 'hidden'
                             }}>
-                              {getInitials(msg.sender.username)}
+                              {otherUser?.avatar_url ? (
+                                <img
+                                  src={otherUser.avatar_url}
+                                  alt={otherUser.username}
+                                  style={{
+                                    width: '100%',
+                                    height: '100%',
+                                    borderRadius: '50%',
+                                    objectFit: 'cover'
+                                  }}
+                                />
+                              ) : (
+                                <div style={{
+                                  width: '100%',
+                                  height: '100%',
+                                  borderRadius: '50%',
+                                  background: '#E4E6EB',
+                                  fontSize: '11px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontWeight: 600,
+                                  color: '#65676B'
+                                }}>
+                                  {getInitials(otherUser?.username)}
+                                </div>
+                              )}
                             </div>
                           )}
 
-                          <div style={{
-                            padding: '8px 12px',
-                            borderRadius: '16px',
-                            backgroundColor: isOwn ? "#2563EB" : theme === "dark" ? "#1E293B" : "#E4E6EB",
-                            color: isOwn ? '#FFFFFF' : theme === "dark" ? "#FFFFFF" : "#000000",
-                            wordWrap: 'break-word',
-                            position: 'relative',
-                            maxWidth: '400px'
-                          }}>
+
+                          <div 
+                            style={{
+                              padding: '8px 12px',
+                              borderRadius: '16px',
+                              backgroundColor: isOwn ? "#2563EB" : theme === "dark" ? "#1E293B" : "#E4E6EB",
+                              color: isOwn ? '#FFFFFF' : theme === "dark" ? "#FFFFFF" : "#000000",
+                              wordWrap: 'break-word',
+                              position: 'relative',
+                              maxWidth: '400px'
+                            }}
+                          >
+
                             {/* Attachment */}
                             {msg.attachment && (
                               <div style={{ marginBottom: msg.text ? '8px' : '0' }}>
@@ -1993,33 +2129,33 @@ export default function ChatLayout() {
                   )}
                 </div>
 
-                {messageInput.trim() && (
+                {messageInput.trim() || selectedFile && (
                   <button 
-                  onClick={handleSendMessage}
-                  disabled={(sending || isBlocked) || (!messageInput.trim() && !selectedFile)}
-                    title="Send message"
-                    style={{
-                      width: '36px',
-                      height: '36px',
-                      borderRadius: '50%',
-                      border: 'none',
-                      backgroundColor: sending ? '#CED0D4' : '#0084FF',
-                      color: '#FFFFFF',
-                      cursor: sending ? 'not-allowed' : 'pointer',
-                      fontSize: '18px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      transition: 'background-color 0.15s'
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!sending) e.currentTarget.style.backgroundColor = '#0077E6';
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!sending) e.currentTarget.style.backgroundColor = '#0084FF';
-                    }}
+                    onClick={handleSendMessage}
+                    disabled={sending || isBlocked}
+                      title="Send message"
+                      style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '50%',
+                        border: 'none',
+                        backgroundColor: sending ? '#CED0D4' : '#0084FF',
+                        color: '#FFFFFF',
+                        cursor: sending ? 'not-allowed' : 'pointer',
+                        fontSize: '18px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        transition: 'background-color 0.15s'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!sending) e.currentTarget.style.backgroundColor = '#0077E6';
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!sending) e.currentTarget.style.backgroundColor = '#0084FF';
+                      }}
                   >
-                    {sending ? '...' : '➤'}
+                      {sending ? '...' : '➤'}
                   </button>
                 )}
               </div>
@@ -2035,6 +2171,26 @@ export default function ChatLayout() {
             }}>
               <div style={{ fontSize: '64px', marginBottom: '16px' }}>💬</div>
               <div style={{ fontSize: '18px', fontWeight: 500 }}>Select a chat to start messaging</div>
+            </div>
+          )}
+
+          {showAvatarPreview && avatarPreviewUrl && (
+            <div className="fixed inset-0 bg-black/90 z-[60] flex items-center justify-center">
+              
+              <button
+                onClick={() => {
+                  setShowAvatarPreview(false);
+                  setAvatarPreviewUrl(null);
+                }}
+                className="absolute top-6 right-6 text-white text-3xl"
+              >
+                ✕
+              </button>
+
+              <img
+                src={avatarPreviewUrl}
+                className="max-w-[90%] max-h-[90%] object-contain rounded-xl"
+              />
             </div>
           )}
         </div>

@@ -245,11 +245,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
         if event["user_id"] == self.user.id:
             return
 
-        await self.send(json.dumps({
-            "type": "presence",
-            "user_id": event["user_id"],
-            "is_online": event["is_online"]
-        }))
+        try:
+            await self.send(json.dumps({
+                "type": "presence",
+                "user_id": event["user_id"],
+                "is_online": event["is_online"],
+            }))
+        except:
+            pass  # socket already closed
 
     # =============================
     # DB HELPERS
@@ -268,21 +271,21 @@ class ChatConsumer(AsyncWebsocketConsumer):
             members__id=user_id
         ).exists()
 
-    @database_sync_to_async
-    def set_user_online(self, user_id):
-        User.objects.filter(id=user_id).update(
-            is_online=True,
-            last_seen=timezone.now()
-        )
-        cache.set(f"user_online_{user_id}", True)
+    # @database_sync_to_async
+    # def set_user_online(self, user_id):
+    #     User.objects.filter(id=user_id).update(
+    #         is_online=True,
+    #         last_seen=timezone.now()
+    #     )
+    #     cache.set(f"user_online_{user_id}", True)
 
-    @database_sync_to_async
-    def set_user_offline(self, user_id):
-        User.objects.filter(id=user_id).update(
-            is_online=False,
-            last_seen=timezone.now()
-        )
-        cache.delete(f"user_online_{user_id}")
+    # @database_sync_to_async
+    # def set_user_offline(self, user_id):
+    #     User.objects.filter(id=user_id).update(
+    #         is_online=False,
+    #         last_seen=timezone.now()
+    #     )
+    #     cache.delete(f"user_online_{user_id}")
 
     @database_sync_to_async
     def mark_messages_delivered(self, user_id, thread_id):
@@ -304,3 +307,35 @@ class ChatConsumer(AsyncWebsocketConsumer):
             msg.delivered_to.add(user)
         except Message.DoesNotExist:
             pass
+
+
+    @database_sync_to_async
+    def set_user_online(self, user_id):
+        key = f"user_connections_{user_id}"
+        count = cache.get(key, 0) + 1
+
+        cache.set(key, count, timeout=600)
+        cache.set(f"user_online_{user_id}", True, timeout=600)
+
+        User.objects.filter(id=user_id).update(
+            is_online=True,
+            last_seen=timezone.now()
+        )    
+
+    @database_sync_to_async
+    def set_user_offline(self, user_id):
+        key = f"user_connections_{user_id}"
+        count = cache.get(key, 0) - 1
+
+        if count <= 0:
+            # 🔥 REAL OFFLINE
+            cache.delete(key)
+            cache.delete(f"user_online_{user_id}")
+
+            User.objects.filter(id=user_id).update(
+                is_online=False,
+                last_seen=timezone.now()
+            )
+        else:
+            # still has other tabs/devices
+            cache.set(key, count, timeout=600)    
