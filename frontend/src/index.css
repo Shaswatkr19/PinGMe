@@ -11,3 +11,9 @@ html, body {
            
     overscroll-behavior: none; /* bounce block */
   }
+
+
+  input::placeholder {
+    color: #94A3B8;
+    opacity: 1;
+  }  

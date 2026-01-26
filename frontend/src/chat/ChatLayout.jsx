@@ -44,6 +44,11 @@ export default function ChatLayout() {
     return localStorage.getItem("blocked") === "true";
   });
 
+  const [followState, setFollowState] = useState({
+    isFollowing: true,
+    isBlocked: false
+  });
+
   const [selectedThread, setSelectedThread] = useState(() => {
     const saved = localStorage.getItem("active_thread");
     return saved ? JSON.parse(saved) : null;
@@ -54,7 +59,30 @@ export default function ChatLayout() {
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState(null);
   
 
+  const handleDeleteMessage = async (messageId) => {
+    try {
+      await api.delete(`/chat/message/${messageId}/`);
+      setMessages(prev => prev.filter(m => m.id !== messageId));
+    } catch {
+      alert("Failed to delete message");
+    }
+  };
+
+
+  const handleDeleteThread = async (threadId) => {
+    if (!window.confirm("Delete entire chat?")) return;
   
+    try {
+      await api.delete(`/chat/thread/${threadId}/`);
+  
+      setThreads(prev => prev.filter(t => t.id !== threadId));
+      setSelectedThread(null);
+      setMessages([]);
+      localStorage.removeItem("active_thread");
+    } catch {
+      alert("Failed to delete chat");
+    }
+  };
 
   const handleLogout = () => {
     // 🔐 Clear auth tokens
@@ -171,20 +199,30 @@ export default function ChatLayout() {
     }
   };
 
-  const MenuItem = ({ label, onClick }) => (
+  const MenuItem = ({ label, onClick, theme }) => (
     <button
       onClick={onClick}
       style={{
         width: "100%",
         padding: "10px 14px",
         border: "none",
-        background: "white",
         cursor: "pointer",
         fontSize: "14px",
-        textAlign: "left"
+        textAlign: "left",
+  
+        backgroundColor: theme === "dark" ? "#020617" : "#FFFFFF",
+        color: theme === "dark" ? "#E5E7EB" : "#000",
+  
+        borderTop: theme === "dark" ? "1px solid #1E293B" : "1px solid #E5E7EB"
       }}
-      onMouseEnter={e => e.currentTarget.style.background = "#F0F2F5"}
-      onMouseLeave={e => e.currentTarget.style.background = "white"}
+      onMouseEnter={(e) =>
+        e.currentTarget.style.backgroundColor =
+          theme === "dark" ? "#1E293B" : "#F0F2F5"
+      }
+      onMouseLeave={(e) =>
+        e.currentTarget.style.backgroundColor =
+          theme === "dark" ? "#020617" : "#FFFFFF"
+      }
     >
       {label}
     </button>
@@ -229,6 +267,24 @@ export default function ChatLayout() {
     setSelectedThread(thread);
     localStorage.setItem("active_thread", JSON.stringify(thread));
     setUserSearchQuery(""); // Clear search when thread is selected
+  };
+
+  const handleFollowToggle = async () => {
+    try {
+      if (isFollowing) {
+        await api.post(`/auth/unfollow/${selectedUserProfile.username}/`);
+      } else {
+        await api.post(`/auth/follow/${selectedUserProfile.username}/`);
+      }
+  
+      // 🔄 refresh profile
+      const res = await api.get(`/auth/search/?q=${selectedUserProfile.username}`);
+      setSelectedUserProfile(res.data[0]);
+  
+      setIsFollowing(!isFollowing);
+    } catch (err) {
+      console.error("Follow/unfollow failed", err);
+    }
   };
 
   const handleFollowUpdate = () => {
@@ -495,6 +551,49 @@ export default function ChatLayout() {
   setIsVideoReady(false);
 }
 
+
+  const syncFollowState = (userId, isFollowing, isBlocked = false) => {
+
+    // 1️⃣ Chat Header + Profile Modal
+    setSelectedUserProfile(prev =>
+      prev && prev.id === userId
+        ? { ...prev, is_following: isFollowing, is_blocked: isBlocked }
+        : prev
+    );
+
+    // 2️⃣ Thread list + sidebar
+    setThreads(prev =>
+      prev.map(thread => ({
+        ...thread,
+        members: thread.members.map(m =>
+          m.id === userId
+            ? { ...m, is_following: isFollowing, is_blocked: isBlocked }
+            : m
+        )
+      }))
+    );
+
+    // 3️⃣ Active chat header
+    setSelectedThread(prev =>
+      prev
+        ? {
+            ...prev,
+            members: prev.members.map(m =>
+              m.id === userId
+                ? { ...m, is_following: isFollowing, is_blocked: isBlocked }
+                : m
+            )
+          }
+        : prev
+    );
+
+    // 4️⃣ Local followState
+    setFollowState({
+      isFollowing,
+      isBlocked
+    });
+  };
+
   // Send message function
   const handleSendMessage = async () => {
     if ((!messageInput.trim() && !selectedFile) || !selectedThread || sending) return;
@@ -566,7 +665,28 @@ export default function ChatLayout() {
   };
 
   // Emoji picker (simple emojis)
-  const commonEmojis = ['😊', '😂', '❤️', '👍', '🎉', '🔥', '💯', '👏', '🙏', '😍'];
+  const commonEmojis = [
+    // 😀 Smileys
+    '😀','😃','😄','😁','😆','😂','🤣','😊','😍','😘','😎','🤩','🥹','😭','😤','😡',
+  
+    // ❤️ Emotions
+    '❤️','🧡','💛','💚','💙','💜','🖤','🤍','💔','❣️','💕','💞','💖',
+  
+    // 👍 Gestures
+    '👍','👎','👌','🤌','👏','🙌','🤝','🙏','✌️','🤞','💪',
+  
+    // 🔥 Reactions
+    '🔥','💯','🎉','✨','⚡','💥','🌈','☀️','🌙',
+  
+    // 😂 Fun
+    '🤣','😜','🤪','😝','🙃','😏',
+  
+    // 😍 Love / Cute
+    '🥰','😍','😘','😚','😻','💋',
+  
+    // 🎯 Misc
+    '🎯','🚀','👀','🫶','🫡','🤍'
+  ];
 
   const handleEmojiClick = (emoji) => {
     setMessageInput(prev => prev + emoji);
@@ -626,15 +746,23 @@ export default function ChatLayout() {
           };
         });
       }
+
+      if (!currentUser) return;
   
       if (data.type === "message") {
-        setMessages(prev => [...prev, data]);
+        if (data.sender?.id === currentUser.id) return;
+      
+        setMessages(prev => {
+          if (prev.some(m => m.id === data.id)) return prev; // 🛑 duplicate guard
+          return [...prev, data];
+        });
       }
     };
   
-    ws.onclose = () => {
-      console.log("💬 Chat WS closed");
-      chatSocketRef.current = null;
+    ws.onclose = (e) => {
+      if (e.code !== 1000) {
+        console.warn("WS closed unexpectedly", e);
+      }
     };
   
     ws.onerror = (e) => {
@@ -645,7 +773,11 @@ export default function ChatLayout() {
       ws.close();
       chatSocketRef.current = null;
     };
-  }, [selectedThread?.id]); // ⚠️ ONLY id
+  }, [selectedThread?.id, currentUser?.id]); // ⚠️ ONLY id
+
+  const activeOtherUser = selectedThread?.members?.find(
+    m => m.id !== currentUser?.id
+  );
 
   return (
     <>
@@ -698,27 +830,55 @@ export default function ChatLayout() {
               <p className="mt-1 text-sm text-slate-400 text-center max-w-xs">
                 {selectedUserProfile.bio || "No bio available"}
               </p>
+              
 
-              {/* Stats */}
-              <div className="flex gap-8 mt-5 text-center">
-                <div>
-                  <p className="text-white font-semibold">
-                    {selectedUserProfile.posts_count || 0}
-                  </p>
-                  <p className="text-xs text-slate-400">Posts</p>
-                </div>
-                <div>
-                  <p className="text-white font-semibold">
+              {/* Stats / Actions */}
+              <div className="mt-6 w-full">
+
+              {/* Audio / Video */}
+              <div className="flex justify-center gap-4 mb-5">
+                <button
+                  onClick={() => {
+                    setSelectedUserProfile(null);
+                    startCall("audio");
+                  }}
+                  className="flex items-center gap-2 px-6 py-2 rounded-full
+                            bg-emerald-600 hover:bg-emerald-700
+                            text-white font-semibold shadow-md transition"
+                >
+                  📞 Audio
+                </button>
+
+                <button
+                  onClick={() => {
+                    setSelectedUserProfile(null);
+                    startCall("video");
+                  }}
+                  className="flex items-center gap-2 px-6 py-2 rounded-full
+                            bg-indigo-600 hover:bg-indigo-700
+                            text-white font-semibold shadow-md transition"
+                >
+                  🎥 Video
+                </button>
+              </div>
+
+              {/* Followers / Following */}
+              <div className="flex justify-center gap-10 text-center">
+                <div className="cursor-pointer hover:opacity-80 transition">
+                  <p className="text-white text-lg font-bold">
                     {selectedUserProfile.followers_count || 0}
                   </p>
                   <p className="text-xs text-slate-400">Followers</p>
                 </div>
-                <div>
-                  <p className="text-white font-semibold">
+
+                <div className="cursor-pointer hover:opacity-80 transition">
+                  <p className="text-white text-lg font-bold">
                     {selectedUserProfile.following_count || 0}
                   </p>
                   <p className="text-xs text-slate-400">Following</p>
                 </div>
+              </div>
+
               </div>
 
               {/* Action Buttons */}
@@ -889,13 +1049,19 @@ export default function ChatLayout() {
             gap: '12px',
           }}>
             {/* User Info */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              flex: 1,
-              minWidth: 0, // Allow truncation
-            }}>
+            <div
+              onClick={() => {
+                setSelectedUserProfile(currentUser); // 🔥 OWN PROFILE MODAL
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                flex: 1,
+                minWidth: 0,
+                cursor: 'pointer'
+              }}
+            >
               {currentUser && (
                 <>
                   {/* Avatar */}
@@ -910,6 +1076,11 @@ export default function ChatLayout() {
                         key={avatarUrl} // Force re-render when URL changes
                         src={avatarUrl}
                         alt={currentUser.username}
+                        onClick={(e) => {
+                          e.stopPropagation();        // ❗ profile modal na khule
+                          setAvatarPreviewUrl(avatarUrl);
+                          setShowAvatarPreview(true);
+                        }}
                         style={{
                           width: '36px',
                           height: '36px',
@@ -926,19 +1097,25 @@ export default function ChatLayout() {
                     ) : null;
                   })()}
                   {(!currentUser.avatar_url && !currentUser.avatar) && (
-                    <div style={{
-                      width: '36px',
-                      height: '36px',
-                      borderRadius: '50%',
-                      background: 'linear-gradient(to bottom right, #9333EA, #EC4899)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#FFFFFF',
-                      fontSize: '14px',
-                      fontWeight: 600,
-                      flexShrink: 0,
-                    }}>
+                    <div 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAvatarPreviewUrl(null); 
+                        setShowAvatarPreview(true);
+                      }}
+                      style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '50%',
+                        background: 'linear-gradient(to bottom right, #9333EA, #EC4899)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#FFFFFF',
+                        fontSize: '14px',
+                        fontWeight: 600,
+                        flexShrink: 0,
+                      }}>
                       {getInitials(currentUser.username)}
                     </div>
                   )}
@@ -1200,6 +1377,28 @@ export default function ChatLayout() {
                       }}>
                         {threadName}
                       </span>
+
+                      {otherUser?.is_following && (
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '4px 10px',
+                            borderRadius: '999px',
+                            background: 'rgba(34,197,94,0.15)', // soft green bg
+                            color: '#22c55e',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            letterSpacing: '0.3px',
+                            boxShadow: '0 0 0 1px rgba(34,197,94,0.35)',
+                          }}
+                        >
+                          <span style={{ fontSize: '12px' }}>✅</span>
+                          Following
+                        </span>
+                      )}
+
                       {thread.updated_at && (
                         <span style={{
                           fontSize: '12px',
@@ -1354,7 +1553,34 @@ export default function ChatLayout() {
                   );
                 })()}
 
-  
+                {(() => {
+                  const otherUser = selectedThread?.members?.find(
+                    m => m.id !== currentUser?.id
+                  );
+
+                  if (!otherUser?.is_following) return null;
+
+                  return (
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '4px 10px',
+                        borderRadius: '999px',
+                        background: 'rgba(34,197,94,0.15)',
+                        color: '#22c55e',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        letterSpacing: '0.3px',
+                        boxShadow: '0 0 0 1px rgba(34,197,94,0.35)',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      ✅ Following
+                    </span>
+                  );
+                })()}
 
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <button
@@ -1384,7 +1610,7 @@ export default function ChatLayout() {
                   {/* Call Button */} 
                   <button
                     onClick={() => {
-                      if (isBlocked) return;
+                      if (followState.isBlocked || !followState.isFollowing) return;
                       setShowCallOptions(prev => !prev);
                     }}
                     title={isBlocked ? "User is blocked" : "Call"}
@@ -1429,7 +1655,7 @@ export default function ChatLayout() {
                     }}>
                       <button
                         onClick={() => {
-                          if (isBlocked) return;
+                          if (followState.isBlocked || !followState.isFollowing) return;
                           startCall("audio");
                           setShowCallOptions(false);
                         }}
@@ -1450,7 +1676,7 @@ export default function ChatLayout() {
 
                       <button
                         onClick={() => {
-                          if (isBlocked) return;
+                          if (followState.isBlocked || !followState.isFollowing) return;
                           startCall("video");
                           setShowCallOptions(false);
                         }}
@@ -1471,6 +1697,37 @@ export default function ChatLayout() {
                     </div>
                   )}
                 </div>
+
+                <button
+                  onClick={() => {
+                    setSelectedThread(null);
+                    localStorage.removeItem("active_thread");
+                  }}
+                  title="Close chat"
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '50%',
+                    border: 'none',
+                    backgroundColor: 'transparent',
+                    cursor: 'pointer',
+                    fontSize: '20px',
+                    color: theme === "dark" ? "#CBD5F5" : "#1C1E21",
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'background-color 0.15s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor =
+                      theme === "dark" ? "#1E293B" : "#E4E6EB";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  x
+                </button>
 
                 <div style={{ position: "relative" }}></div>
                   <button
@@ -1502,11 +1759,11 @@ export default function ChatLayout() {
                       top: "42px",
                       right: 0,
                       backgroundColor: theme === "dark" ? "#020617" : "#FFFFFF",
-                      color: theme === "dark" ? "#FFFFFF" : "#000",
+                      color: theme === "dark" ? "#E5E7EB" : "#000",
                       border: theme === "dark" ? "1px solid #1E293B" : "1px solid #ddd",
-                      borderRadius: "10px",
-                      boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-                      minWidth: "180px",
+                      borderRadius: "12px",
+                      boxShadow: "0 6px 20px rgba(0,0,0,0.25)",
+                      minWidth: "190px",
                       zIndex: 1000,
                       overflow: "hidden"
                     }}>
@@ -1540,24 +1797,59 @@ export default function ChatLayout() {
                     
                       
                       <MenuItem
-                        label={isBlocked ? "🔓 Unblock User" : "🚫 Block User"}
+                        theme={theme}
+                        label={followState.isBlocked ? "🔓 Unblock User" : "🚫 Block User"}
                         onClick={() => {
-                          const next = !isBlocked;          // ✅ FIX #1
+                          if (!activeOtherUser) return;
 
-                          setIsBlocked(next);               // state update
-                          localStorage.setItem("blocked", String(next)); // ✅ FIX #2
+                          const nextBlocked = !followState.isBlocked;
 
+                          syncFollowState(
+                            activeOtherUser.id,
+                            nextBlocked ? false : followState.isFollowing,
+                            nextBlocked
+                          );
+
+                          localStorage.setItem("blocked", String(nextBlocked));
                           setShowMenu(false);
                         }}
                       />
 
 
                       <MenuItem
-                        label={isFollowing ? "❌ Unfollow" : "✅ Follow"}
-                        onClick={() => {
-                          setIsFollowing(prev => !prev);
-                          setShowMenu(false);
+                        theme={theme}
+                        label={followState.isFollowing ? "❌ Unfollow" : "✅ Follow"}
+                        onClick={async () => {
+                          if (!activeOtherUser) return;
+
+                          const nextFollow = !followState.isFollowing;
+
+                          try {
+                            if (nextFollow) {
+                              await api.post(`/auth/follow/${activeOtherUser.username}/`);
+                            } else {
+                              await api.post(`/auth/unfollow/${activeOtherUser.username}/`);
+                            }
+
+                            // 🔥 CENTRAL SYNC
+                            syncFollowState(
+                              activeOtherUser.id,
+                              nextFollow,
+                              !nextFollow // unfollow → block
+                            );
+
+                            setShowMenu(false);
+                          } catch (err) {
+                            console.error("Follow toggle failed", err);
+                          }
                         }}
+                      />
+
+
+                      <MenuItem
+                        theme={theme}
+                        label="🗑️ Delete Chat"
+                        onClick={() => handleDeleteThread(selectedThread.id)}
                       />
 
                     </div>
@@ -1771,6 +2063,34 @@ export default function ChatLayout() {
                               maxWidth: '400px'
                             }}
                           >
+                            {/* DELETE BUTTON – only for own message */}
+                            {isOwn && (
+                              <button
+                                onClick={() => {
+                                  if (!window.confirm("Delete this message?")) return;
+                                  handleDeleteMessage(msg.id);
+                                }}
+                                style={{
+                                  position: "absolute",
+                                  top: "-6px",
+                                  right: "-6px",
+                                  background: "#ef4444",
+                                  color: "#fff",
+                                  borderRadius: "50%",
+                                  width: "18px",
+                                  height: "18px",
+                                  fontSize: "10px",
+                                  cursor: "pointer",
+                                  border: "none",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center"
+                                }}
+                                title="Delete message"
+                              >
+                                x
+                              </button>
+                            )}
 
                             {/* Attachment */}
                             {msg.attachment && (
@@ -1973,7 +2293,7 @@ export default function ChatLayout() {
               }}>
                 <button 
                   onClick={() => {
-                    if (isBlocked) return;
+                    if (followState.isBlocked || !followState.isFollowing) return;
                     fileInputRef.current.click();
                   }}
                   title={isBlocked ? "You blocked this user" : "Attach file"}
@@ -2036,37 +2356,49 @@ export default function ChatLayout() {
                   onChange={handleTyping}
                   onKeyPress={handleKeyPress}
                   placeholder={
-                    isBlocked
+                    followState.isBlocked
                       ? "You blocked this user"
-                      : "Type a message..."
+                      : !followState.isFollowing
+                        ? "Follow user to send message"
+                        : "Type a message..."
                   }
                   disabled={sending || isBlocked}
                   style={{
                     flex: 1,
                     padding: '10px 16px',
-                    border: '1px solid #E4E6EB',
+                    border: theme === "dark"
+                      ? '1px solid #1E293B'
+                      : '1px solid #E4E6EB',
                     borderRadius: '20px',
                     fontSize: '14px',
                     outline: 'none',
-                    backgroundColor: isBlocked ? '#E5E7EB' : '#F0F2F5',
+
+                    backgroundColor: isBlocked
+                      ? '#475569'
+                      : theme === "dark"
+                        ? '#020617'
+                        : '#F0F2F5',
+
+                    color: theme === "dark" ? '#E5E7EB' : '#1C1E21',
+
                     cursor: isBlocked ? 'not-allowed' : 'text',
                     transition: 'all 0.15s'
                   }}
                   onFocus={(e) => {
-                    e.target.style.backgroundColor = '#FFFFFF';
                     e.target.style.borderColor = '#0084FF';
                   }}
                   onBlur={(e) => {
-                    e.target.style.backgroundColor = '#F0F2F5';
-                    e.target.style.borderColor = '#E4E6EB';
+                    e.target.style.borderColor =
+                      theme === "dark" ? '#1E293B' : '#E4E6EB';
                   }}
                 />
 
                 <div style={{ position: 'relative' }}>
-                  <button 
+                  {/* Emoji Button */}
+                  <button
                     onClick={() => {
-                      if (isBlocked) return;
-                      setShowEmojiPicker(!showEmojiPicker);
+                      if (followState.isBlocked || !followState.isFollowing) return;
+                      setShowEmojiPicker(prev => !prev);
                     }}
                     title={isBlocked ? "You blocked this user" : "Add emoji"}
                     style={{
@@ -2083,32 +2415,44 @@ export default function ChatLayout() {
                       justifyContent: 'center',
                       transition: 'background-color 0.15s'
                     }}
-                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#F0F2F5'}
-                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor =
+                        theme === "dark" ? "#1E293B" : "#F0F2F5";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
                   >
                     😊
                   </button>
 
                   {/* Emoji Picker */}
                   {showEmojiPicker && (
-                    <div style={{
-                      position: 'absolute',
-                      bottom: '50px',
-                      right: '0',
-                      backgroundColor: '#FFFFFF',
-                      border: '1px solid #E4E6EB',
-                      borderRadius: '12px',
-                      padding: '12px',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(5, 1fr)',
-                      gap: '8px',
-                      zIndex: 1000
-                    }}>
+                    <div
+                      style={{
+                        position: 'absolute',
+                        bottom: '50px',
+                        right: 0,
+                        backgroundColor: theme === "dark" ? "#020617" : "#FFFFFF",
+                        border: theme === "dark" ? "1px solid #1E293B" : "1px solid #E4E6EB",
+                        borderRadius: '12px',
+                        padding: '12px',
+                        boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(6, 1fr)',
+                        gap: '8px',
+                        maxHeight: '260px',
+                        overflowY: 'auto',
+                        zIndex: 1000
+                      }}
+                    >
                       {commonEmojis.map((emoji, i) => (
                         <button
                           key={i}
-                          onClick={() => handleEmojiClick(emoji)}
+                          onClick={() => {
+                            setMessageInput(prev => prev + emoji); // ✅ emoji add
+                            setShowEmojiPicker(false);             // ✅ picker close
+                          }}
                           style={{
                             width: '36px',
                             height: '36px',
@@ -2119,8 +2463,13 @@ export default function ChatLayout() {
                             borderRadius: '6px',
                             transition: 'background-color 0.15s'
                           }}
-                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#F0F2F5'}
-                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor =
+                              theme === "dark" ? "#1E293B" : "#F0F2F5";
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = 'transparent';
+                          }}
                         >
                           {emoji}
                         </button>
@@ -2129,7 +2478,7 @@ export default function ChatLayout() {
                   )}
                 </div>
 
-                {messageInput.trim() || selectedFile && (
+                {(messageInput.trim() || selectedFile) && (
                   <button 
                     onClick={handleSendMessage}
                     disabled={sending || isBlocked}

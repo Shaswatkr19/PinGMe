@@ -11,6 +11,23 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
 
+
+
+class DeleteMessageView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, message_id):
+        try:
+            msg = Message.objects.get(id=message_id)
+        except Message.DoesNotExist:
+            return Response({"error": "Message not found"}, status=404)
+
+        # 🔐 only sender can delete
+        if msg.sender != request.user:
+            return Response({"error": "Not allowed"}, status=403)
+
+        msg.delete()
+        return Response({"success": True}, status=204)
 # -----------------------------
 # List all threads of logged-in user
 # -----------------------------
