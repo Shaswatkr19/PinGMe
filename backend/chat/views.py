@@ -9,6 +9,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import IsAuthenticated
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+from django.shortcuts import get_object_or_404
 
 
 class SetThreadThemeView(APIView):
@@ -285,4 +286,21 @@ class MediaMessageUploadView(APIView):
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-        
+class MarkThreadReadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, thread_id):
+        thread = get_object_or_404(Thread, id=thread_id)
+
+        unread_messages = Message.objects.filter(
+            thread=thread
+        ).exclude(
+            read_by=request.user
+        ).exclude(
+            sender=request.user
+        )
+
+        for msg in unread_messages:
+            msg.read_by.add(request.user)
+
+        return Response({"success": True})        

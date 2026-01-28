@@ -3,7 +3,8 @@ from .views import (
     ThreadListView, CreateThreadView,
     MessageListView, SendMessageView,
     MediaMessageUploadView,
-    DeleteMessageView, SetThreadThemeView
+    DeleteMessageView, SetThreadThemeView,
+    MarkThreadReadView
 )
 
 urlpatterns = [
@@ -14,4 +15,5 @@ urlpatterns = [
     path("threads/<int:thread_id>/media/", MediaMessageUploadView.as_view(), name="media-message-upload"),
     path("message/<int:message_id>/", DeleteMessageView.as_view()),
     path("threads/<int:thread_id>/theme/", SetThreadThemeView.as_view()),
+     path("chat/thread/<int:thread_id>/read/", MarkThreadReadView.as_view()),
 ]

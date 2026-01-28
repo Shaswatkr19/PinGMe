@@ -101,6 +101,7 @@ class ThreadSerializer(serializers.ModelSerializer):
     members = UserSerializer(many=True, read_only=True)
     last_message = serializers.SerializerMethodField()
     unread_count = serializers.SerializerMethodField()
+    is_blocked = serializers.SerializerMethodField()
 
     class Meta:
         model = Thread
@@ -112,6 +113,7 @@ class ThreadSerializer(serializers.ModelSerializer):
             'last_message',
             'unread_count',
             'chat_theme',
+            'is_blocked',
         ]
 
     def get_last_message(self, obj):
@@ -124,12 +126,23 @@ class ThreadSerializer(serializers.ModelSerializer):
         return None
 
     def get_unread_count(self, obj):
-        """
-        Count messages not read by current user
-        """
-        request = self.context.get("request")
-        if not request or request.user.is_anonymous:
-            return 0
+        user = self.context["request"].user
+        return obj.messages.exclude(
+            read_by=user
+        ).exclude(
+            sender=user
+        ).count()
 
-        user = request.user
-        return obj.messages.exclude(read_by=user).count()
+    def get_is_blocked(self, obj):
+        request = self.context.get("request")
+        if not request:
+            return False
+
+        me = request.user
+
+        # 1:1 chat → other user
+        other = obj.members.exclude(id=me.id).first()
+        if not other:
+            return False
+
+        return me.blocked_users.filter(id=other.id).exists()    

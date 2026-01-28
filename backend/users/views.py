@@ -301,20 +301,29 @@ class BlockUserView(APIView):
             return Response({"success": True}, status=status.HTTP_200_OK)
 
         except User.DoesNotExist:
-            return Response({"error": "User not found"}, status=404)
+            return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
 
 class UnblockUserView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def post(self, request, username):
+    def post(self, request, username, *args, **kwargs):
         try:
-            target = User.objects.get(username=username)
-        except User.DoesNotExist:
-            return Response({"error": "User not found"}, status=404)
-        
-        request.user.blocked_users.remove(target)
-        return Response({"message": f"You unblocked {username}"})
+            user_to_unblock = User.objects.get(username=username)
 
+            if not request.user.blocked_users.filter(id=user_to_unblock.id).exists():
+                return Response(
+                    {"error": "User is not blocked"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            request.user.blocked_users.remove(user_to_unblock)
+            return Response({"success": True}, status=status.HTTP_200_OK)
+
+        except User.DoesNotExist:
+            return Response(
+                {"error": "User not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
 class FollowersListView(generics.ListAPIView):
     """Get list of current user's followers"""

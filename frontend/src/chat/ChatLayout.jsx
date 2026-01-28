@@ -441,18 +441,46 @@ export default function ChatLayout() {
       });
   }, []);
 
-  const handleThreadSelect = (thread) => {
+  const handleThreadSelect = async (thread) => {
     setSelectedThread(thread);
     localStorage.setItem("active_thread", JSON.stringify(thread));
-    setUserSearchQuery(""); // Clear search when thread is selected
-
+    setUserSearchQuery("");
+  
+    // 🎨 chat theme
     if (thread.chat_theme) {
       setChatTheme(thread.chat_theme);
     } else {
       setChatTheme(null);
     }
+  
+    // 🔥 MARK THREAD AS READ
+    try {
+      await api.post(`/chat/thread/${thread.id}/read/`);
+  
+      setThreads(prev =>
+        prev.map(t =>
+          t.id === thread.id
+            ? { ...t, unread_count: 0 }
+            : t
+        )
+      );
+    } catch (err) {
+      console.error("❌ Failed to mark thread as read", err);
+    }
+  
+    // 🚨🚨🚨 ADD THIS PART (VERY IMPORTANT)
+    const otherUser = thread.members.find(
+      m => m.id !== currentUser?.id
+    );
+  
+    if (otherUser) {
+      setFollowState({
+        isFollowing: !!otherUser.is_following,
+        isBlocked: !!otherUser.is_blocked,
+      });
+    }
   };
-
+  
   const handleFollowToggle = async () => {
     try {
       if (isFollowing) {
@@ -2673,34 +2701,47 @@ export default function ChatLayout() {
                         ? "Follow user to send message"
                         : "Type a message..."
                   }
-                  disabled={sending || isBlocked}
+                  disabled={sending || followState.isBlocked || !followState.isFollowing}
                   style={{
                     flex: 1,
-                    padding: '10px 16px',
-                    border: theme === "dark"
-                      ? '1px solid #1E293B'
-                      : '1px solid #E4E6EB',
-                    borderRadius: '20px',
-                    fontSize: '14px',
-                    outline: 'none',
+                    padding: "10px 16px",
+                    borderRadius: "20px",
+                    fontSize: "14px",
+                    outline: "none",
 
-                    backgroundColor: isBlocked
-                      ? '#475569'
-                      : theme === "dark"
-                        ? '#020617'
-                        : '#F0F2F5',
+                    border:
+                      theme === "dark"
+                        ? "1px solid #1E293B"
+                        : "1px solid #E4E6EB",
 
-                    color: theme === "dark" ? '#E5E7EB' : '#1C1E21',
+                    backgroundColor:
+                      followState.isBlocked || !followState.isFollowing
+                        ? "#334155"          // 🔒 locked look
+                        : theme === "dark"
+                          ? "#020617"
+                          : "#F0F2F5",
 
-                    cursor: isBlocked ? 'not-allowed' : 'text',
-                    transition: 'all 0.15s'
+                    color:
+                      followState.isBlocked || !followState.isFollowing
+                        ? "#94A3B8"          // 🔒 grey text
+                        : theme === "dark"
+                          ? "#E5E7EB"
+                          : "#1C1E21",
+
+                    cursor:
+                      followState.isBlocked || !followState.isFollowing
+                        ? "not-allowed"
+                        : "text",
+
+                    transition: "all 0.15s",
                   }}
                   onFocus={(e) => {
-                    e.target.style.borderColor = '#0084FF';
+                    if (followState.isBlocked || !followState.isFollowing) return;
+                    e.target.style.borderColor = "#0084FF";
                   }}
                   onBlur={(e) => {
                     e.target.style.borderColor =
-                      theme === "dark" ? '#1E293B' : '#E4E6EB';
+                      theme === "dark" ? "#1E293B" : "#E4E6EB";
                   }}
                 />
 
