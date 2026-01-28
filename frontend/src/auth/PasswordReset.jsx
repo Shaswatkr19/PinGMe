@@ -56,26 +56,32 @@ export default function PasswordReset() {
         {/* Title */}
         <div className="text-center mb-14 space-y-4">
           <div>
-            <h1 className="text-7xl sm:text-9xl font-black mb-4 flex justify-center items-baseline space-x-[-0.5rem] sm:space-x-[-1rem] py-4">
-              <span className="inline-block -rotate-6 bg-gradient-to-br from-purple-500 to-indigo-500 bg-clip-text text-transparent filter drop-shadow-[0_5px_0_rgba(0,0,0,0.2)]">
-                P
-              </span>
-              <span className="inline-block rotate-12 translate-y-4 bg-gradient-to-br from-pink-500 to-red-500 bg-clip-text text-transparent filter drop-shadow-[0_5px_0_rgba(0,0,0,0.2)]">
-                i
-              </span>
-              <span className="inline-block -rotate-3 bg-gradient-to-br from-cyan-500 to-blue-500 bg-clip-text text-transparent filter drop-shadow-[0_5px_0_rgba(0,0,0,0.2)]">
-                n
-              </span>
-              <span className="inline-block rotate-[15deg] translate-y-2 bg-gradient-to-br from-green-500 to-teal-500 bg-clip-text text-transparent filter drop-shadow-[0_5px_0_rgba(0,0,0,0.2)]">
-                g
-              </span>
-              <span className="inline-block -rotate-12 bg-gradient-to-br from-yellow-400 to-orange-500 bg-clip-text text-transparent filter drop-shadow-[0_5px_0_rgba(0,0,0,0.2)]">
-                M
-              </span>
-              <span className="inline-block rotate-6 translate-y-3 bg-gradient-to-br from-red-500 to-pink-500 bg-clip-text text-transparent filter drop-shadow-[0_5px_0_rgba(0,0,0,0.2)]">
-                e
-              </span>
-            </h1>
+          <h1 className="text-7xl sm:text-9xl font-black mb-4 flex justify-center items-baseline space-x-[-0.5rem] sm:space-x-[-1rem] py-4">
+            {/* P - Thoda left tilt */}
+            <span className="inline-block -rotate-6 bg-gradient-to-br from-purple-500 to-indigo-500 bg-clip-text text-transparent filter drop-shadow-[0_5px_0_rgba(0,0,0,0.2)] hover:-translate-y-2 transition-all">
+              P
+            </span>
+            {/* i - Thoda right tilt aur niche */}
+            <span className="inline-block rotate-12 translate-y-4 bg-gradient-to-br from-pink-500 to-red-500 bg-clip-text text-transparent filter drop-shadow-[0_5px_0_rgba(0,0,0,0.2)] hover:-translate-y-2 transition-all">
+              i
+            </span>
+            {/* n - Wapas left tilt */}
+            <span className="inline-block -rotate-3 bg-gradient-to-br from-cyan-500 to-blue-500 bg-clip-text text-transparent filter drop-shadow-[0_5px_0_rgba(0,0,0,0.2)] hover:-translate-y-2 transition-all">
+              n
+            </span>
+            {/* g - Zyada right tilt */}
+            <span className="inline-block rotate-[15deg] translate-y-2 bg-gradient-to-br from-green-500 to-teal-500 bg-clip-text text-transparent filter drop-shadow-[0_5px_0_rgba(0,0,0,0.2)] hover:-translate-y-2 transition-all">
+              g
+            </span>
+            {/* M - Heavy left tilt */}
+            <span className="inline-block -rotate-12 bg-gradient-to-br from-yellow-400 to-orange-500 bg-clip-text text-transparent filter drop-shadow-[0_5px_0_rgba(0,0,0,0.2)] hover:-translate-y-2 transition-all">
+              M
+            </span>
+            {/* e - Slight right */}
+            <span className="inline-block rotate-6 translate-y-3 bg-gradient-to-br from-red-500 to-pink-500 bg-clip-text text-transparent filter drop-shadow-[0_5px_0_rgba(0,0,0,0.2)] hover:-translate-y-2 transition-all">
+              e
+            </span>
+          </h1>
             <p className="text-gray-500 text-sm sm:text-base font-medium tracking-wide">
               Reset your password
             </p>

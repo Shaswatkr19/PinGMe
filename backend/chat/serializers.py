@@ -111,6 +111,7 @@ class ThreadSerializer(serializers.ModelSerializer):
             'created_at',
             'last_message',
             'unread_count',
+            'chat_theme',
         ]
 
     def get_last_message(self, obj):

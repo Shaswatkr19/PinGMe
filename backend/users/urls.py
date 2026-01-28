@@ -4,7 +4,7 @@ from .views import (
     RegisterView, LoginView, MeView,
     UpdateProfileView, FollowUserView, UnfollowUserView, UserSearchView, MyProfileView, UserOnlineStatusView,
     UsernameAvailabilityView, PasswordResetRequestView, PasswordResetConfirmView,
-    UnblockUserView, FollowersListView, FollowingListView, BlockedUsersListView
+    UnblockUserView, FollowersListView, FollowingListView, BlockedUsersListView, BlockUserView
 )
 
 urlpatterns = [
@@ -31,5 +31,6 @@ urlpatterns = [
     path("me/followers/", FollowersListView.as_view()),
     path("me/following/", FollowingListView.as_view()),
     path("me/blocked/", BlockedUsersListView.as_view()),
+    path("block/<str:username>/", BlockUserView.as_view()),
     path("unblock/<str:username>/", UnblockUserView.as_view()),
 ]

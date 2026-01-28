@@ -11,7 +11,22 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
 
+class SetThreadThemeView(APIView):
+    permission_classes = [IsAuthenticated]
 
+    def post(self, request, thread_id):
+        try:
+            thread = Thread.objects.get(id=thread_id, members=request.user)
+        except Thread.DoesNotExist:
+            return Response({"error": "Thread not found"}, status=404)
+
+        thread.chat_theme = request.data.get("chat_theme")
+        thread.save()
+
+        return Response({
+            "success": True,
+            "chat_theme": thread.chat_theme
+        })
 
 class DeleteMessageView(APIView):
     permission_classes = [IsAuthenticated]

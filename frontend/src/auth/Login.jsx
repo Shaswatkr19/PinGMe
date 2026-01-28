@@ -143,6 +143,7 @@ export default function Login() {
           <div className="absolute -inset-1 bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 rounded-[28px] sm:rounded-[32px] blur-2xl opacity-20 group-hover:opacity-30 transition duration-500"></div>
           
           {/* Card */}
+        <form onSubmit={handleLogin}>  
           <div className="relative bg-slate-900/90 backdrop-blur-2xl rounded-[28px] sm:rounded-[32px] p-6 sm:p-8 border border-slate-800/50 shadow-2xl">
             {/* Header */}
             <div className="mb-6 sm:mb-8">
@@ -251,8 +252,9 @@ export default function Login() {
             </div>
 
             {/* Login Button - Mobile optimized */}
+          
             <button
-              onClick={handleLogin}
+              type="submit"
               disabled={loading}
               className="w-full relative group/btn mb-5 sm:mb-6"
             >
@@ -276,6 +278,8 @@ export default function Login() {
                 )}
               </div>
             </button>
+          
+          
 
             {/* Divider - Mobile optimized */}
             <div className="relative my-5 sm:my-7">
@@ -309,6 +313,7 @@ export default function Login() {
               </button>
             </div>
           </div>
+        </form>  
         </div>
 
         {/* Sign Up Link - Mobile optimized */}

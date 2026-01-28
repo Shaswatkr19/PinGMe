@@ -17,3 +17,26 @@ html, body {
     color: #94A3B8;
     opacity: 1;
   }  
+
+  @keyframes floatIcons {
+    from { background-position: 0 0; }
+    to { background-position: 100px 100px; }
+  }
+  
+  @keyframes softBreeze {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+  }
+
+  @keyframes joyfulFloat {
+    0% { background-position: 0% 0%; }
+    50% { background-position: 100% 100%; }
+    100% { background-position: 0% 0%; }
+  }
+  
+  @keyframes joyfulGradient {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }

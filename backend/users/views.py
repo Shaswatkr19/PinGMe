@@ -277,11 +277,31 @@ class UserOnlineStatusView(APIView):
 class BlockUserView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def post(self, request, user_id):
-        other = User.objects.get(id=user_id)
-        request.user.blocked_users.add(other)
-        return Response({"status": "blocked"})
+    def post(self, request, username, *args, **kwargs):  # 👈 THIS LINE FIXES IT
+        try:
+            user_to_block = User.objects.get(username=username)
 
+            if user_to_block.id == request.user.id:
+                return Response(
+                    {"error": "You cannot block yourself"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            if request.user.blocked_users.filter(id=user_to_block.id).exists():
+                return Response(
+                    {"error": "User already blocked"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            request.user.blocked_users.add(user_to_block)
+
+            if request.user.following.filter(id=user_to_block.id).exists():
+                request.user.following.remove(user_to_block)
+
+            return Response({"success": True}, status=status.HTTP_200_OK)
+
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=404)
 
 class UnblockUserView(APIView):
     permission_classes = [IsAuthenticated]

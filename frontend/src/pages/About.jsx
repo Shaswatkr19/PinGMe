@@ -1,6 +1,9 @@
-import { MessageCircle, Shield, Zap, Users, ArrowLeft } from 'lucide-react';
+import { MessageCircle, Shield, Zap, Users, ArrowLeft, Linkedin, Github, Mail, X  } from 'lucide-react';
+import { useState } from 'react';
+import founderPhoto from "../assets/founder-photo.jpg";
 
 export default function About() {
+  const [showAvatarModal, setShowAvatarModal] = useState(false);
   return (
     <div className="min-h-screen bg-[#020617] text-gray-200 flex flex-col">
       {/* Header */}
@@ -63,6 +66,110 @@ export default function About() {
           </div>
         </div>
       </section>
+
+      {/* Founder Section */}
+      <section className="max-w-6xl mx-auto px-6 py-16">
+        <div className="text-center mb-12">
+          <h2 className="text-3xl font-bold mb-3">Meet the Founder</h2>
+          <p className="text-gray-400">The vision behind PingMe</p>
+        </div>
+
+        <div className="max-w-3xl mx-auto bg-[#0f172a] p-8 md:p-12 rounded-2xl border border-gray-800 hover:border-purple-500/50 transition-all">
+          <div className="flex flex-col md:flex-row items-center md:items-start gap-8">
+            {/* Avatar */}
+            <div className="flex-shrink-0">
+              <div 
+                onClick={() => setShowAvatarModal(true)}
+                className="w-32 h-32 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-4xl font-bold text-white cursor-pointer hover:scale-105 transition-transform overflow-hidden"
+              >
+                <img
+                  src={founderPhoto}
+                  alt="Shaswat Kumar"
+                  className="w-full h-full object-cover object-top scale-[1.05]"
+                />
+              </div>
+            </div>
+
+            {/* Info */}
+            <div className="flex-1 text-center md:text-left">
+              <h3 className="text-2xl font-bold mb-2">Shaswat Kumar</h3>
+              <p className="text-purple-400 font-medium mb-4">Founder</p>
+              
+              <p className="text-gray-300 leading-relaxed mb-6">
+                I'm a growing Full Stack Developer who loves learning, building, and improving 
+                every day. I focus on creating practical, user friendly web solutions while 
+                constantly sharpening my skills with modern technologies.
+              </p>
+
+              {/* Contact Info */}
+              <div className="flex flex-col sm:flex-row items-center justify-center md:justify-start gap-3 mb-6">
+                <a
+                  href="mailto:shaswatkr19@gmail.com"
+                  className="inline-flex items-center gap-2 text-gray-400 hover:text-purple-400 transition-colors"
+                >
+                  <Mail className="w-4 h-4" />
+                  <span className="text-sm">shaswatsinha356@gmail.com</span>
+                </a>
+              </div>
+
+              {/* Social Links */}
+              <div className="flex flex-wrap items-center justify-center md:justify-start gap-3">
+                <a
+                  href="https://www.linkedin.com/in/shaswatkr19"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#0A66C2] hover:bg-[#004182] text-white rounded-lg transition-colors"
+                >
+                  <Linkedin className="w-4 h-4" />
+                  <span>LinkedIn</span>
+                </a>
+
+                <a
+                  href="https://github.com/Shaswatkr19"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors"
+                >
+                  <Github className="w-4 h-4" />
+                  <span>GitHub</span>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Avatar Modal */}
+      {showAvatarModal && (
+      <div
+        className="fixed inset-0 bg-black/80 backdrop-blur-sm 
+                  flex items-center justify-center z-50 p-4"
+      >
+        <div className="relative">
+
+          {/* CLOSE BUTTON */}
+          <button
+            onClick={() => setShowAvatarModal(false)}
+            className="absolute -top-4 -right-4 z-50
+                      bg-black/70 hover:bg-black
+                      text-white rounded-full p-2
+                      shadow-lg transition"
+          >
+            <X className="w-5 h-5" />
+          </button>
+
+          {/* IMAGE */}
+          <img
+            src={founderPhoto}
+            alt="Shaswat Kumar"
+            className="max-w-[70vw] max-h-[60vh] 
+                      object-contain rounded-xl
+                      mx-auto border border-purple-500/40"
+          />
+        </div>
+      </div>
+    )}
+
 
       {/* Mission Section */}
       <section className="max-w-6xl mx-auto px-6 py-16">

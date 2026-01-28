@@ -4,6 +4,7 @@ import { getCurrentUser } from "../api/auth.api";
 import { fetchThreads } from "../api/chat.api";
 import UserSearch from "../components/UserSearch";
 import Settings from "../pages/Settings";
+import { blockUser, unblockUser } from "../api/auth.api";
 
 export default function ChatLayout() {
   const [threads, setThreads] = useState([]);
@@ -39,6 +40,9 @@ export default function ChatLayout() {
   const localVideoRef = useRef(null);
   const [isVideoReady, setIsVideoReady] = useState(false);
   const [selectedUserProfile, setSelectedUserProfile] = useState(null);
+  const [chatTheme, setChatTheme] = useState(null);
+  const [showThemePicker, setShowThemePicker] = useState(false);
+  
 
   const [isBlocked, setIsBlocked] = useState(() => {
     return localStorage.getItem("blocked") === "true";
@@ -58,6 +62,180 @@ export default function ChatLayout() {
   const [showAvatarPreview, setShowAvatarPreview] = useState(false);
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState(null);
   
+
+  const chatThemes = [
+    {
+      label: "🌌 Midnight Glow",
+      type: "pattern",
+      value: {
+        background: "#020617",
+        backgroundSize: "cover",
+        animation: "none",
+        pattern: `
+  radial-gradient(circle at 20% 30%, rgba(59,130,246,0.12), transparent 40%),
+  radial-gradient(circle at 80% 20%, rgba(168,85,247,0.12), transparent 45%),
+  radial-gradient(circle at 50% 80%, rgba(34,197,94,0.10), transparent 45%)
+  `
+      }
+    },
+    {
+      label: "🌊 Ocean Night",
+      type: "pattern",
+      value: {
+        background: "#020617",
+        backgroundSize: "cover",
+        animation: "none",
+        pattern: `
+  radial-gradient(circle at top left, rgba(14,165,233,0.18), transparent 45%),
+  radial-gradient(circle at bottom right, rgba(6,182,212,0.15), transparent 45%)
+  `
+      }
+    },
+    {
+      label: "💜 Purple Luxe",
+      type: "pattern",
+      value: {
+        background: "#020617",
+        backgroundSize: "cover",
+        animation: "none",
+        pattern: `
+  radial-gradient(circle at 30% 20%, rgba(168,85,247,0.22), transparent 40%),
+  radial-gradient(circle at 70% 80%, rgba(236,72,153,0.18), transparent 45%)
+  `
+      }
+    },
+    {
+      label: "💬 WhatsApp Classic",
+      type: "pattern",
+      value: {
+        background: "#0b141a",   // WhatsApp dark base
+        animation: "none",
+        pattern: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E
+  %3Cg fill='none' stroke='%23ffffff' stroke-opacity='0.08' stroke-width='2'%3E
+  %3Cpath d='M20 30 h40 v30 h-40 z'/%3E
+  %3Cpath d='M90 20 q20 0 20 20 q0 20 -20 20 q-10 10 -15 15 v-15 q-15 0 -15 -20 q0 -20 30 -20z'/%3E
+  %3Cpath d='M120 120 h35 v25 h-35 z'/%3E
+  %3Cpath d='M30 110 q15 -15 30 0'/%3E
+  %3C/g%3E
+  %3C/svg%3E")`
+      }
+    },
+    {
+        label: "☀️ Sunny Delight",
+        type: "pattern",
+        value: {
+          background: "#fef3c7",
+          backgroundSize: "cover",
+          animation: "none",
+          pattern: `
+    radial-gradient(circle at 20% 30%, rgba(251,191,36,0.2), transparent 40%),
+    radial-gradient(circle at 80% 20%, rgba(249,115,22,0.15), transparent 45%),
+    radial-gradient(circle at 50% 80%, rgba(245,158,11,0.18), transparent 45%)
+    `
+        }
+    },
+    {
+        label: "🌸 Blossom Fresh",
+        type: "pattern",
+        value: {
+          background: "#fce7f3",
+          backgroundSize: "cover",
+          animation: "none",
+          pattern: `
+    radial-gradient(circle at top left, rgba(236,72,153,0.2), transparent 45%),
+    radial-gradient(circle at bottom right, rgba(244,114,182,0.18), transparent 45%),
+    radial-gradient(circle at 50% 50%, rgba(251,207,232,0.3), transparent 40%)
+    `
+        }
+    },
+    {
+        label: "🍃 Mint Garden",
+        type: "pattern",
+        value: {
+          background: "#d1fae5",
+          backgroundSize: "cover",
+          animation: "none",
+          pattern: `
+    radial-gradient(circle at 30% 20%, rgba(16,185,129,0.25), transparent 40%),
+    radial-gradient(circle at 70% 80%, rgba(52,211,153,0.2), transparent 45%),
+    radial-gradient(circle at 50% 50%, rgba(110,231,183,0.15), transparent 50%)
+    `
+        }
+    },
+    {
+        label: "🌈 Rainbow Joy",
+        type: "pattern",
+        value: {
+          background: "#fef9c3",
+          backgroundSize: "cover",
+          animation: "none",
+          pattern: `
+    radial-gradient(circle at 15% 25%, rgba(239,68,68,0.12), transparent 35%),
+    radial-gradient(circle at 85% 30%, rgba(59,130,246,0.12), transparent 35%),
+    radial-gradient(circle at 50% 75%, rgba(34,197,94,0.15), transparent 40%),
+    radial-gradient(circle at 40% 60%, rgba(168,85,247,0.1), transparent 35%)
+    `
+        }
+    },
+    {
+        label: "🏖️ Beach Vibes",
+        type: "pattern",
+        value: {
+          background: "#e0f2fe",
+          backgroundSize: "cover",
+          animation: "none",
+          pattern: `
+    radial-gradient(circle at top left, rgba(14,165,233,0.22), transparent 45%),
+    radial-gradient(circle at bottom right, rgba(56,189,248,0.18), transparent 45%),
+    radial-gradient(circle at 50% 30%, rgba(125,211,252,0.2), transparent 40%)
+    `
+        }
+    },
+    {
+        label: "🍑 Peach Cream",
+        type: "pattern",
+        value: {
+          background: "#ffedd5",
+          backgroundSize: "cover",
+          animation: "none",
+          pattern: `
+    radial-gradient(circle at 25% 35%, rgba(251,146,60,0.18), transparent 40%),
+    radial-gradient(circle at 75% 65%, rgba(253,186,116,0.2), transparent 45%),
+    radial-gradient(circle at 50% 80%, rgba(254,215,170,0.25), transparent 50%)
+    `
+        }
+    },
+    {
+        label: "💜 Lavender Dream",
+        type: "pattern",
+        value: {
+          background: "#ede9fe",
+          backgroundSize: "cover",
+          animation: "none",
+          pattern: `
+    radial-gradient(circle at 30% 20%, rgba(139,92,246,0.2), transparent 40%),
+    radial-gradient(circle at 70% 80%, rgba(167,139,250,0.18), transparent 45%),
+    radial-gradient(circle at 50% 50%, rgba(196,181,253,0.22), transparent 45%)
+    `
+        }
+    },
+    {
+        label: "🌺 Tropical Paradise",
+        type: "pattern",
+        value: {
+          background: "#fef3c7",
+          backgroundSize: "cover",
+          animation: "none",
+          pattern: `
+    radial-gradient(circle at 20% 40%, rgba(236,72,153,0.15), transparent 38%),
+    radial-gradient(circle at 80% 30%, rgba(245,158,11,0.18), transparent 40%),
+    radial-gradient(circle at 45% 75%, rgba(20,184,166,0.2), transparent 42%)
+    `
+        }
+    }
+    
+  ];  
+    
 
   const handleDeleteMessage = async (messageId) => {
     try {
@@ -267,6 +445,12 @@ export default function ChatLayout() {
     setSelectedThread(thread);
     localStorage.setItem("active_thread", JSON.stringify(thread));
     setUserSearchQuery(""); // Clear search when thread is selected
+
+    if (thread.chat_theme) {
+      setChatTheme(thread.chat_theme);
+    } else {
+      setChatTheme(null);
+    }
   };
 
   const handleFollowToggle = async () => {
@@ -778,6 +962,23 @@ export default function ChatLayout() {
   const activeOtherUser = selectedThread?.members?.find(
     m => m.id !== currentUser?.id
   );
+
+  const activeTheme = selectedThread?.chat_theme;
+  const themeData = selectedThread?.chat_theme;
+
+  const applyChatTheme = async (theme) => {
+    await api.post(
+      `/chat/threads/${selectedThread.id}/theme/`,
+      {
+        chat_theme: theme, 
+      }
+    );
+  
+    setSelectedThread((prev) => ({
+      ...prev,
+      chat_theme: theme,
+    }));
+  };
 
   return (
     <>
@@ -1582,6 +1783,90 @@ export default function ChatLayout() {
                   );
                 })()}
 
+                {/* Theme Picker Button */}
+                <div style={{ position: "relative" }}>
+                  <button
+                    title="Chat Theme"
+                    onClick={() => setShowThemePicker(prev => !prev)}
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: "50%",
+                      border: "none",
+                      background: showThemePicker 
+                        ? (theme === "dark" ? "#1E293B" : "#E4E6EB")
+                        : "transparent",
+                      cursor: "pointer",
+                      fontSize: 18,
+                      transition: 'background-color 0.15s'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 
+                        theme === "dark" ? "#1E293B" : "#F0F2F5";
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!showThemePicker) {
+                        e.currentTarget.style.backgroundColor = "transparent";
+                      }
+                    }}
+                  >
+                    🎨
+                  </button>
+
+                  {showThemePicker && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 42,
+                        right: 0,
+
+                        background: theme === "dark" ? "#020617" : "#fff",
+                        border: "1px solid #1E293B",
+                        borderRadius: 12,
+
+                        padding: 10,
+                        zIndex: 2000,
+
+                        width: "240px",        // ✅ FIXED WIDTH
+                        maxHeight: "300px",    // ✅ HEIGHT LIMIT
+                        overflowY: "auto",     // ✅ SCROLL
+
+                        display: "grid",       // ✅ GRID
+                        gridTemplateColumns: "1fr 1fr", // ✅ 2 COLUMNS
+                        gap: "6px"
+                      }}
+                    >
+                      {chatThemes.map((t) => (
+                        <button
+                          key={t.label}
+                          onClick={() => {
+                            applyChatTheme(t);
+                            setShowThemePicker(false);
+                          }}
+                          style={{
+                            padding: "6px 8px",
+                            fontSize: "13px",
+                            borderRadius: "8px",
+                            border: "none",
+                            cursor: "pointer",
+
+                            background: theme === "dark" ? "#1E293B" : "#F1F5F9",
+                            color: theme === "dark" ? "#E5E7EB" : "#0F172A",
+
+                            textAlign: "left",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis"
+                          }}
+                        >
+                          {t.label}
+                        </button>
+                      ))}
+  
+                    </div>
+                  )}
+                </div>
+
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <button
                     onClick={() => setShowSearch(prev => !prev)}
@@ -1645,13 +1930,13 @@ export default function ChatLayout() {
                       position: "absolute",
                       top: "42px",
                       right: 0,
-                      backgroundColor: "#fff",
-                      border: "1px solid #ddd",
-                      borderRadius: "10px",
-                      boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                      backgroundColor: theme === "dark" ? "#020617" : "#FFFFFF",
+                      border: theme === "dark" ? "1px solid #1E293B" : "1px solid #E4E6EB",
+                      borderRadius: "12px",
+                      boxShadow: "0 6px 20px rgba(0,0,0,0.25)",
                       overflow: "hidden",
                       zIndex: 1000,
-                      minWidth: "150px"
+                      minWidth: "160px"
                     }}>
                       <button
                         onClick={() => {
@@ -1664,7 +1949,8 @@ export default function ChatLayout() {
                           width: "100%",
                           padding: "10px 14px",
                           border: "none",
-                          background: "white",
+                          background: theme === "dark" ? "#020617" : "#FFFFFF",
+                          color: theme === "dark" ? "#E5E7EB" : "#000",
                           cursor: isBlocked ? "not-allowed" : "pointer",
                           fontSize: "14px",
                           textAlign: "left",
@@ -1685,7 +1971,8 @@ export default function ChatLayout() {
                           width: "100%",
                           padding: "10px 14px",
                           border: "none",
-                          background: "white",
+                          background: theme === "dark" ? "#020617" : "#FFFFFF",
+                          color: theme === "dark" ? "#E5E7EB" : "#000",
                           cursor: isBlocked ? "not-allowed" : "pointer",
                           fontSize: "14px",
                           textAlign: "left",
@@ -1799,19 +2086,34 @@ export default function ChatLayout() {
                       <MenuItem
                         theme={theme}
                         label={followState.isBlocked ? "🔓 Unblock User" : "🚫 Block User"}
-                        onClick={() => {
+                        onClick={async () => {
                           if (!activeOtherUser) return;
 
-                          const nextBlocked = !followState.isBlocked;
+                          try {
+                            if (!followState.isBlocked) {
+                              // 🚫 BLOCK
+                              await blockUser(activeOtherUser.username);
 
-                          syncFollowState(
-                            activeOtherUser.id,
-                            nextBlocked ? false : followState.isFollowing,
-                            nextBlocked
-                          );
+                              syncFollowState(
+                                activeOtherUser.id,
+                                false,  // unfollow
+                                true    // blocked
+                              );
+                            } else {
+                              // 🔓 UNBLOCK
+                              await unblockUser(activeOtherUser.username);
 
-                          localStorage.setItem("blocked", String(nextBlocked));
-                          setShowMenu(false);
+                              syncFollowState(
+                                activeOtherUser.id,
+                                false,
+                                false
+                              );
+                            }
+
+                            setShowMenu(false);
+                          } catch (err) {
+                            console.error("Block/unblock failed", err);
+                          }
                         }}
                       />
 
@@ -1861,8 +2163,8 @@ export default function ChatLayout() {
               {showSearch && (
               <div style={{
                 padding: '14px 20px',
-                borderBottom: '1px solid #E4E6EB',
-                backgroundColor: '#FFFFFF'
+                borderBottom: theme === "dark" ? "1px solid #1E293B" : "1px solid #E4E6EB",
+                backgroundColor: theme === "dark" ? "#020617" : "#FFFFFF"
               }}>
                 <input
                   type="text"
@@ -1875,10 +2177,11 @@ export default function ChatLayout() {
                     height: '44px',          // 🔥 height badhai
                     padding: '0 14px',       // 🔥 andar space
                     borderRadius: '10px',    // 🔥 smooth corners
-                    border: '1px solid #DADDE1',
                     fontSize: '15px',        // 🔥 text thoda bada
                     outline: 'none',
-                    backgroundColor: '#F0F2F5'
+                    backgroundColor: theme === "dark" ? "#020617" : "#F0F2F5",
+                    color: theme === "dark" ? "#E5E7EB" : "#000",
+                    border: theme === "dark" ? "1px solid #1E293B" : "1px solid #DADDE1",
                   }}
                   onFocus={(e) => e.target.style.borderColor = '#0084FF'}
                   onBlur={(e) => e.target.style.borderColor = '#DADDE1'}
@@ -1958,16 +2261,24 @@ export default function ChatLayout() {
               </div>
             )}
 
-              {/* Messages */}
-              <div style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: '20px',
-                backgroundColor: theme === "dark" ? "#020617" : "#F8F9FA",
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '4px'
-              }}>
+              {/* Messages Container  */}
+
+                <div
+                  style={{
+                    flex: 1,
+
+                    overflowY: "auto",          // ✅ MUST
+                    overflowX: "hidden",
+
+                    backgroundColor: themeData?.value?.background || "#0b141a",
+                    backgroundImage: themeData?.value?.pattern,
+                    backgroundRepeat: "repeat",
+                    backgroundSize: "180px 180px",
+
+                    padding: "16px 20px",       // ✅ padding yahin honi chahiye
+                    backgroundAttachment: "fixed" // ✅ WhatsApp feel
+                  }}
+                >
                 {loading ? (
                   <div style={{ textAlign: 'center', color: '#65676B', padding: '40px' }}>
                     Loading messages...

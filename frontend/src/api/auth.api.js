@@ -36,6 +36,9 @@ export const getFollowing = () =>
 export const getBlockedUsers = () =>
   api.get("/auth/me/blocked/");
 
+export const blockUser = (username) =>
+  api.post(`/auth/block/${username}/`);
+
 export const unblockUser = (username) =>
   api.post(`/auth/unblock/${username}/`);
 

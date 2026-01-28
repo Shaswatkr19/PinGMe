@@ -9,6 +9,9 @@ class Thread(models.Model):
     members = models.ManyToManyField(User, related_name='threads')
     created_at = models.DateTimeField(auto_now_add=True)
 
+    chat_theme = models.JSONField(null=True, blank=True)
+
+
     def __str__(self):
         return self.name or f"Thread {self.id}"
 
