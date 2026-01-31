@@ -377,6 +377,48 @@ export default function ChatLayout() {
     }
   };
 
+    // 📞 CALL SOCKET — THREAD SELECT PE AUTO CONNECT
+    useEffect(() => {
+      if (!selectedThread?.id) return;
+    
+      // already connected
+      if (callSocketRef.current) return;
+    
+      const token = localStorage.getItem("access");
+      if (!token) return;
+    
+      const ws = new WebSocket(
+        `ws://127.0.0.1:8000/ws/call/${selectedThread.id}/?token=${token}`
+      );
+    
+      callSocketRef.current = ws;
+    
+      ws.onopen = () => {
+        console.log("📞 Call WS connected");
+      };
+    
+      ws.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        handleCallSignal(data);
+      };
+    
+      ws.onerror = (e) => {
+        console.error("❌ Call WS error", e);
+      };
+    
+      ws.onclose = () => {
+        console.log("📴 Call WS closed");
+        callSocketRef.current = null;
+      };
+    
+      return () => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        }
+        callSocketRef.current = null;
+      };
+    }, [selectedThread?.id]);
+
   const MenuItem = ({ label, onClick, theme }) => (
     <button
       onClick={onClick}
@@ -597,32 +639,39 @@ export default function ChatLayout() {
   const startCall = async (type) => {
     if (!selectedThread) return;
   
-    if (!callSocketRef.current || callSocketRef.current.readyState !== 1) {
-      alert("Call socket not connected yet");
+    if (
+      !callSocketRef.current ||
+      callSocketRef.current.readyState !== WebSocket.OPEN
+    ) {
+      alert("Call socket not ready");
       return;
     }
+    
+    // small wait for WS
+    setTimeout(async () => {
+      if (callSocketRef.current.readyState !== 1) {
+        alert("Call connection failed");
+        return;
+      }
   
-    setCallType(type);
-    setCallStatus("calling");
-    setCallMode(type);
+      setCallType(type);
+      setCallStatus("calling");
+      setCallMode(type);
   
-    console.log("📞 Starting", type, "call");
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: type === "video",
+      });
   
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: type === "video",
-    });
+      localStreamRef.current = stream;
   
-    localStreamRef.current = stream;
-
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = stream;
-    }
+      callSocketRef.current.send(JSON.stringify({
+        type: "call:initiate",
+        data: { callType: type },
+      }));
   
-    callSocketRef.current.send(JSON.stringify({
-      type: "call:initiate",
-      data: { callType: type },
-    }));
+      console.log("📞 Call initiated");
+    }, 200);
   };
 
   const createPeer = () => {
@@ -909,6 +958,10 @@ export default function ChatLayout() {
 
   useEffect(() => {
     if (!selectedThread?.id) return;
+
+    if (chatSocketRef.current?.readyState === WebSocket.OPEN) {
+      return;
+    }
   
     // 🚫 already connected? STOP
     if (chatSocketRef.current) {
@@ -982,7 +1035,9 @@ export default function ChatLayout() {
     };
   
     return () => {
-      ws.close();
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close(1000, "cleanup");
+      }
       chatSocketRef.current = null;
     };
   }, [selectedThread?.id, currentUser?.id]); // ⚠️ ONLY id
@@ -2250,6 +2305,14 @@ export default function ChatLayout() {
                     }
                     setCallMode(callType);
                     setCallStatus("connecting");
+                    if (
+                      !callSocketRef.current ||
+                      callSocketRef.current.readyState !== WebSocket.OPEN
+                    ) {
+                      alert("Call connection not ready");
+                      return;
+                    }
+                    
                     callSocketRef.current.send(JSON.stringify({
                       type: "call:accept",
                     }));
@@ -2268,12 +2331,18 @@ export default function ChatLayout() {
 
                 <button
                   onClick={() => {
-                    callSocketRef.current.send(JSON.stringify({
-                      type: "call:reject",
-                  }));
-                  setCallStatus(null);
-                  setCallType(null);
-                  setCallMode(null);    
+                    if (
+                      callSocketRef.current &&
+                      callSocketRef.current.readyState === WebSocket.OPEN
+                    ) {
+                      callSocketRef.current.send(JSON.stringify({
+                        type: "call:reject",
+                      }));
+                    }
+                    
+                    setCallStatus(null);
+                    setCallType(null);
+                    setCallMode(null);
                   }}
                   style={{
                     background: "#ef4444",
