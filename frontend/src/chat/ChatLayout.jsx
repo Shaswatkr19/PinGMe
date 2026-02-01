@@ -20,12 +20,8 @@ export default function ChatLayout() {
   const [isTyping, setIsTyping] = useState(false);
   const [typingTimeout, setTypingTimeout] = useState(null);
   const [showMenu, setShowMenu] = useState(false);
-  const [isFollowing, setIsFollowing] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
-  const [theme, setTheme] = useState(() => {
-    // Load theme from localStorage on mount
-    return localStorage.getItem("theme") || "dark";
-  });
+  
   const [showCallOptions, setShowCallOptions] = useState(false);
   const [callType, setCallType] = useState(null);
   const callSocketRef = useRef(null); 
@@ -40,13 +36,21 @@ export default function ChatLayout() {
   const localVideoRef = useRef(null);
   const [isVideoReady, setIsVideoReady] = useState(false);
   const [selectedUserProfile, setSelectedUserProfile] = useState(null);
-  const [chatTheme, setChatTheme] = useState(null);
   const [showThemePicker, setShowThemePicker] = useState(false);
-  
+
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const recordingIntervalRef = useRef(null);
 
   const [isBlocked, setIsBlocked] = useState(() => {
     return localStorage.getItem("blocked") === "true";
   });
+
+  
+  const [messageReactions, setMessageReactions] = useState({});
+  
 
   const [followState, setFollowState] = useState({
     isFollowing: true,
@@ -61,7 +65,33 @@ export default function ChatLayout() {
   const [userSearchQuery, setUserSearchQuery] = useState("");
   const [showAvatarPreview, setShowAvatarPreview] = useState(false);
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState(null);
-  
+  const [replyingTo, setReplyingTo] = useState(null);
+  const touchStartXRef = useRef(0);
+  const touchCurrentXRef = useRef(0);
+    
+
+  const [showReactions, setShowReactions] = useState(null);
+
+  useEffect(() => {
+    const closeReactions = () => setShowReactions(null);
+    
+    if (showReactions) {
+      document.addEventListener('click', closeReactions);
+      return () => document.removeEventListener('click', closeReactions);
+    }
+  }, [showReactions]);
+
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem("theme");
+    if (saved && saved !== "auto") return saved;
+    
+    // Auto detect
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? "dark" : "light";
+  });
+
+  const [themeMode, setThemeMode] = useState(() => {
+    return localStorage.getItem("theme") || "auto";
+  });
 
   const chatThemes = [
     {
@@ -235,6 +265,26 @@ export default function ChatLayout() {
     }
     
   ];  
+
+  
+const [isMobile, setIsMobile] = useState(false);
+const [showSidebar, setShowSidebar] = useState(true);
+
+useEffect(() => {
+  const checkMobile = () => {
+    const mobile = window.innerWidth < 768;
+    setIsMobile(mobile);
+    
+    // Mobile pe sidebar auto-hide when chat selected
+    if (mobile && selectedThread) {
+      setShowSidebar(false);
+    }
+  };
+  
+  checkMobile();
+  window.addEventListener('resize', checkMobile);
+  return () => window.removeEventListener('resize', checkMobile);
+}, [selectedThread]);
     
 
   const handleDeleteMessage = async (messageId) => {
@@ -449,16 +499,6 @@ export default function ChatLayout() {
   );
 
 
-  const callOptionStyle = {
-    width: "100%",
-    padding: "10px 14px",
-    border: "none",
-    background: "white",
-    cursor: "pointer",
-    fontSize: "14px",
-    textAlign: "left"
-  };
-
   const filteredMessages = searchText
   ? messages.filter(m =>
       m.text.toLowerCase().includes(searchText.toLowerCase())
@@ -487,6 +527,10 @@ export default function ChatLayout() {
     setSelectedThread(thread);
     localStorage.setItem("active_thread", JSON.stringify(thread));
     setUserSearchQuery("");
+
+    if (isMobile) {
+      setShowSidebar(false);
+    }
   
     // 🎨 chat theme
     if (thread.chat_theme) {
@@ -523,24 +567,6 @@ export default function ChatLayout() {
     }
   };
   
-  const handleFollowToggle = async () => {
-    try {
-      if (isFollowing) {
-        await api.post(`/auth/unfollow/${selectedUserProfile.username}/`);
-      } else {
-        await api.post(`/auth/follow/${selectedUserProfile.username}/`);
-      }
-  
-      // 🔄 refresh profile
-      const res = await api.get(`/auth/search/?q=${selectedUserProfile.username}`);
-      setSelectedUserProfile(res.data[0]);
-  
-      setIsFollowing(!isFollowing);
-    } catch (err) {
-      console.error("Follow/unfollow failed", err);
-    }
-  };
-
   const handleFollowUpdate = () => {
     // Refresh threads after follow/unfollow
     fetchThreads()
@@ -621,6 +647,21 @@ export default function ChatLayout() {
     localStorage.setItem("theme", theme);
   }, [theme]);
 
+  // 🌓 AUTO THEME DETECTION
+  useEffect(() => {
+    if (themeMode !== "auto") return;
+    
+    const darkModeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    
+    const updateTheme = (e) => {
+      setTheme(e.matches ? 'dark' : 'light');
+    };
+    
+    darkModeQuery.addEventListener('change', updateTheme);
+    
+    return () => darkModeQuery.removeEventListener('change', updateTheme);
+  }, [themeMode]);
+
   const handleTyping = (e) => {
     setMessageInput(e.target.value);
     setIsTyping(true);
@@ -700,9 +741,13 @@ export default function ChatLayout() {
       }
     
       // video
-      if (remoteVideoRef.current) {
+      if (remoteVideoRef.current && callMode === "video") {
         remoteVideoRef.current.srcObject = stream;
-        setIsVideoReady(true);
+        
+        // Wait for video to load
+        remoteVideoRef.current.onloadedmetadata = () => {
+          setIsVideoReady(true);
+        };
       }
     };
   
@@ -865,6 +910,11 @@ export default function ChatLayout() {
       sender: { username: currentUser?.username || "You", id: currentUser?.id },
       created_at: new Date().toISOString(),
       status: 'sending',
+      reply_to: replyingTo ? {
+        id: replyingTo.id,
+        text: replyingTo.text,
+        sender: replyingTo.sender.username
+      } : null,
       attachment: selectedFile ? {
         name: selectedFile.name,
         type: selectedFile.type,
@@ -880,6 +930,7 @@ export default function ChatLayout() {
     setSelectedFile(null);
     setFilePreview(null);
     setIsTyping(false);
+    setReplyingTo(null); 
     setSending(true);
 
     try {
@@ -917,6 +968,82 @@ export default function ChatLayout() {
     }
   };
 
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+      
+      recorder.ondataavailable = (e) => {
+        audioChunksRef.current.push(e.data);
+      };
+      
+      recorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        
+        // Send as file
+        const formData = new FormData();
+        formData.append("file", audioBlob, "voice-message.webm");
+        formData.append("text", "🎤 Voice message");
+        
+        try {
+          const response = await api.post(
+            `/chat/threads/${selectedThread.id}/media/`,
+            formData,
+            { headers: { "Content-Type": "multipart/form-data" } }
+          );
+          
+          setMessages(prev => [...prev, response.data]);
+        } catch (err) {
+          console.error("Failed to send voice message", err);
+        }
+        
+        // Cleanup
+        stream.getTracks().forEach(track => track.stop());
+        setRecordingTime(0);
+      };
+      
+      recorder.start();
+      setIsRecording(true);
+      
+      // Timer
+      recordingIntervalRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+      
+    } catch (err) {
+      console.error("Mic access denied", err);
+      alert("Please allow microphone access");
+    }
+  };
+  
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+      }
+    }
+  };
+  
+  const cancelRecording = () => {
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      setRecordingTime(0);
+      
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+      }
+      
+      audioChunksRef.current = [];
+    }
+  };
+
   // Handle Enter key
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -925,9 +1052,11 @@ export default function ChatLayout() {
     }
   };
 
+
+  const reactionEmojis = ['❤️', '😂', '😮', '😢', '🙏', '👍'];
   // Emoji picker (simple emojis)
   const commonEmojis = [
-    // 😀 Smileys
+    // 😀 Smiley
     '😀','😃','😄','😁','😆','😂','🤣','😊','😍','😘','😎','🤩','🥹','😭','😤','😡',
   
     // ❤️ Emotions
@@ -949,23 +1078,13 @@ export default function ChatLayout() {
     '🎯','🚀','👀','🫶','🫡','🤍'
   ];
 
-  const handleEmojiClick = (emoji) => {
-    setMessageInput(prev => prev + emoji);
-    setShowEmojiPicker(false);
-  };
-
   const chatSocketRef = useRef(null);
 
   useEffect(() => {
     if (!selectedThread?.id) return;
-
-    if (chatSocketRef.current?.readyState === WebSocket.OPEN) {
-      return;
-    }
   
-    // 🚫 already connected? STOP
-    if (chatSocketRef.current) {
-      console.log("⛔ Chat WS already exists, skipping");
+    // 🚫 already connected (React strict-mode safe)
+    if (chatSocketRef.current?.readyState === WebSocket.OPEN) {
       return;
     }
   
@@ -984,6 +1103,16 @@ export default function ChatLayout() {
   
     ws.onmessage = (e) => {
       const data = JSON.parse(e.data);
+
+      if (data.type === "message_status") {
+        setMessages(prev =>
+          prev.map(m =>
+            m.id === data.message_id
+              ? { ...m, status: data.status }
+              : m
+          )
+        );
+      }  
   
       if (data.type === "presence") {
         const { user_id, is_online } = data;
@@ -1001,27 +1130,32 @@ export default function ChatLayout() {
           )
         );
   
-        setSelectedThread(prev => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            members: prev.members.map(m =>
-              m.id === user_id ? { ...m, is_online } : m
-            )
-          };
-        });
+        setSelectedThread(prev =>
+          prev
+            ? {
+                ...prev,
+                members: prev.members.map(m =>
+                  m.id === user_id ? { ...m, is_online } : m
+                )
+              }
+            : prev
+        );
       }
-
+  
       if (!currentUser) return;
   
       if (data.type === "message") {
         if (data.sender?.id === currentUser.id) return;
-      
+  
         setMessages(prev => {
-          if (prev.some(m => m.id === data.id)) return prev; // 🛑 duplicate guard
+          if (prev.some(m => m.id === data.id)) return prev;
           return [...prev, data];
         });
       }
+    };
+  
+    ws.onerror = (e) => {
+      console.error("❌ Chat WS error", e);
     };
   
     ws.onclose = (e) => {
@@ -1030,23 +1164,20 @@ export default function ChatLayout() {
       }
     };
   
-    ws.onerror = (e) => {
-      console.error("❌ Chat WS error", e);
-    };
-  
     return () => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.close(1000, "cleanup");
       }
       chatSocketRef.current = null;
     };
-  }, [selectedThread?.id, currentUser?.id]); // ⚠️ ONLY id
+  }, [selectedThread?.id, currentUser?.id]);
 
+
+  
   const activeOtherUser = selectedThread?.members?.find(
     m => m.id !== currentUser?.id
   );
 
-  const activeTheme = selectedThread?.chat_theme;
   const themeData = selectedThread?.chat_theme;
 
   const applyChatTheme = async (theme) => {
@@ -1168,32 +1299,53 @@ export default function ChatLayout() {
               {/* Action Buttons */}
               <div className="flex gap-3 mt-6 w-full">
 
-                {selectedUserProfile.is_following ? (
+                {selectedUserProfile?.id !== currentUser?.id && (
+                <>
+                  {selectedUserProfile.is_following ? (
+                    <button
+                      onClick={async () => {
+                        try {
+                          await api.post(`/auth/unfollow/${selectedUserProfile.username}/`);
+                          syncFollowState(selectedUserProfile.id, false, false);
+                          const res = await api.get(`/auth/search/?q=${selectedUserProfile.username}`);
+                          setSelectedUserProfile(res.data[0]);
+                        } catch (err) {
+                          console.error("Unfollow failed", err);
+                        }
+                      }}
+                      className="flex-1 py-2 rounded-lg bg-slate-700 text-white font-semibold hover:bg-slate-600 transition"
+                    >
+                      Following
+                    </button>
+                  ) : (
+                    <button
+                      onClick={async () => {
+                        try {
+                          await api.post(`/auth/follow/${selectedUserProfile.username}/`);
+                          syncFollowState(selectedUserProfile.id, true, false);
+                          const res = await api.get(`/auth/search/?q=${selectedUserProfile.username}`);
+                          setSelectedUserProfile(res.data[0]);
+                        } catch (err) {
+                          console.error("Follow failed", err);
+                        }
+                      }}
+                      className="flex-1 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold hover:opacity-90 transition"
+                    >
+                      Follow
+                    </button>
+                  )}
+
                   <button
-                    onClick={() => handleUnfollow(selectedUserProfile)}
+                    onClick={() => {
+                      setSelectedUserProfile(null);
+                      handleMessage(selectedUserProfile);
+                    }}
                     className="flex-1 py-2 rounded-lg bg-slate-700 text-white font-semibold hover:bg-slate-600 transition"
                   >
-                    Following
+                    Message
                   </button>
-                ) : (
-                  <button
-                    onClick={() => handleFollow(selectedUserProfile)}
-                    className="flex-1 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold hover:opacity-90 transition"
-                  >
-                    Follow
-                  </button>
-                )}
-
-                <button
-                  onClick={() => {
-                    setSelectedUserProfile(null);
-                    handleMessage(selectedUserProfile);
-                  }}
-                  className="flex-1 py-2 rounded-lg bg-slate-700 text-white font-semibold hover:bg-slate-600 transition"
-                >
-                  Message
-                </button>
-
+                </>
+              )}  
               </div>
             </div>
           </div>
@@ -1249,9 +1401,106 @@ export default function ChatLayout() {
         </div>
       )}
 
+       {/* 🎧 AUDIO CALL UI */}
+       {callStatus === "connected" && callMode === "audio" && (
+        <div style={{
+          position: "fixed",
+          inset: 0,
+          background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+          zIndex: 9998,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "#fff"
+        }}>
+          {/* Caller Info */}
+          <div style={{ textAlign: "center", marginBottom: 40 }}>
+            <div style={{
+              width: 120,
+              height: 120,
+              borderRadius: "50%",
+              background: "rgba(255,255,255,0.2)",
+              margin: "0 auto 20px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 48
+            }}>
+              {activeOtherUser?.avatar_url ? (
+                <img
+                  src={activeOtherUser.avatar_url}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    borderRadius: "50%",
+                    objectFit: "cover"
+                  }}
+                />
+              ) : (
+                <span>{activeOtherUser?.username?.[0]?.toUpperCase()}</span>
+              )}
+            </div>
+            <h2 style={{ fontSize: 28, marginBottom: 8 }}>
+              {activeOtherUser?.username}
+            </h2>
+            <p style={{ fontSize: 16, opacity: 0.9 }}>Audio Call</p>
+          </div>
+
+          {/* Controls */}
+          <div style={{ display: "flex", gap: 20 }}>
+            <button
+              onClick={toggleMute}
+              style={{
+                width: 60,
+                height: 60,
+                borderRadius: "50%",
+                border: "none",
+                background: isMuted ? "#ef4444" : "rgba(255,255,255,0.3)",
+                cursor: "pointer",
+                fontSize: 24
+              }}
+            >
+              {isMuted ? "🔇" : "🎤"}
+            </button>
+
+            <button
+              onClick={switchToVideo}
+              style={{
+                width: 60,
+                height: 60,
+                borderRadius: "50%",
+                border: "none",
+                background: "rgba(255,255,255,0.3)",
+                cursor: "pointer",
+                fontSize: 24
+              }}
+            >
+              🎥
+            </button>
+
+            <button
+              onClick={endCall}
+              style={{
+                width: 60,
+                height: 60,
+                borderRadius: "50%",
+                border: "none",
+                background: "#ef4444",
+                cursor: "pointer",
+                fontSize: 24
+              }}
+            >
+              📞
+            </button>
+          </div>
+        </div>
+      )}
+
+
       {callStatus === "connected" &&
       callMode === "video" &&
-      isVideoReady && (   // 🔥 NEW GUARD
+      isVideoReady && (
         <div style={{
           position: "fixed",
           inset: 0,
@@ -1279,7 +1528,7 @@ export default function ChatLayout() {
             playsInline
             style={{
               position: "absolute",
-              bottom: 20,
+              bottom: 100,
               right: 20,
               width: 160,
               height: 220,
@@ -1288,6 +1537,84 @@ export default function ChatLayout() {
               border: "2px solid white"
             }}
           />
+
+          {/* 🎮 VIDEO CONTROLS - BOTTOM CENTER */}
+          <div style={{
+            position: "absolute",
+            bottom: 30,
+            left: "50%",
+            transform: "translateX(-50%)",
+            display: "flex",
+            gap: 20,
+            alignItems: "center"
+          }}>
+            {/* Mute Button */}
+            <button
+              onClick={toggleMute}
+              style={{
+                width: 60,
+                height: 60,
+                borderRadius: "50%",
+                border: "none",
+                background: isMuted ? "#ef4444" : "rgba(255,255,255,0.3)",
+                cursor: "pointer",
+                fontSize: 24,
+                backdropFilter: "blur(10px)"
+              }}
+            >
+              {isMuted ? "🔇" : "🎤"}
+            </button>
+
+            {/* Video Toggle Button */}
+            <button
+              onClick={toggleVideo}
+              style={{
+                width: 60,
+                height: 60,
+                borderRadius: "50%",
+                border: "none",
+                background: isVideoOff ? "#ef4444" : "rgba(255,255,255,0.3)",
+                cursor: "pointer",
+                fontSize: 24,
+                backdropFilter: "blur(10px)"
+              }}
+            >
+              {isVideoOff ? "📷" : "🎥"}
+            </button>
+
+            {/* Switch to Audio */}
+            <button
+              onClick={switchToAudio}
+              style={{
+                width: 60,
+                height: 60,
+                borderRadius: "50%",
+                border: "none",
+                background: "rgba(255,255,255,0.3)",
+                cursor: "pointer",
+                fontSize: 24,
+                backdropFilter: "blur(10px)"
+              }}
+            >
+              🎧
+            </button>
+
+            {/* End Call Button */}
+            <button
+              onClick={endCall}
+              style={{
+                width: 60,
+                height: 60,
+                borderRadius: "50%",
+                border: "none",
+                background: "#ef4444",
+                cursor: "pointer",
+                fontSize: 24
+              }}
+            >
+              📞
+            </button>
+          </div>
         </div>
       )}
 
@@ -1298,7 +1625,9 @@ export default function ChatLayout() {
         height: '100vh',
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
         backgroundColor: theme === 'dark' ? '#020617' : '#F0F2F5',
-        color: theme === "dark" ? "#E5E7EB" : "#000"
+        color: theme === "dark" ? "#E5E7EB" : "#000",
+        position: 'relative',
+        overflow: 'hidden'
       }}>
         {/* Settings Modal */}
         {showSettings && (
@@ -1316,11 +1645,14 @@ export default function ChatLayout() {
 
         {/* SIDEBAR */}
         <div style={{
-          width: '360px',
+          width: isMobile ? '100%' : '360px',
           backgroundColor: theme === "dark" ? "#020617" : "#FFFFFF",
           borderRight: theme === "dark" ? "1px solid #1E293B" : "1px solid #E4E6EB",
-          display: 'flex',
-          flexDirection: 'column'
+          display: isMobile ? (showSidebar ? 'flex' : 'none') : 'flex',
+          flexDirection: 'column',
+          position: isMobile ? 'absolute' : 'relative',
+          zIndex: isMobile ? 100 : 'auto',
+          height: '100vh'
         }}>
           {/* Sidebar Header */}
           <div style={{
@@ -1736,7 +2068,6 @@ export default function ChatLayout() {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: theme === "dark" ? "#020617" : "#FFFFFF" }}>
           {selectedThread ? (
             <>
-              {/* Chat Header */}
               <div
                 style={{
                   padding: "16px 20px",
@@ -1749,6 +2080,25 @@ export default function ChatLayout() {
                   gap: "12px",
                 }}
               >
+                {/* 🔙 MOBILE BACK BUTTON */}
+                {isMobile && (
+                  <button
+                    onClick={() => setShowSidebar(true)}
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: "50%",
+                      border: "none",
+                      background: "transparent",
+                      cursor: "pointer",
+                      fontSize: 20,
+                      color: theme === "dark" ? "#E5E7EB" : "#1C1E21"
+                    }}
+                  >
+                    ←
+                  </button>
+                )}
+
                 {/* LEFT: avatar + name + status (FULL CLICKABLE) */}
                 {(() => {
                   const otherUser = selectedThread?.members?.find(
@@ -2153,7 +2503,17 @@ export default function ChatLayout() {
                       </div>
                       <div
                         onClick={() => {
-                          setTheme(prev => prev === "dark" ? "light" : "dark");
+                          const next = themeMode === "auto" ? "dark" : themeMode === "dark" ? "light" : "auto";
+                          setThemeMode(next);
+                          localStorage.setItem("theme", next);
+                          
+                          if (next === "auto") {
+                            const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                            setTheme(isDark ? "dark" : "light");
+                          } else {
+                            setTheme(next);
+                          }
+                          
                           setShowMenu(false);
                         }}
                         style={{
@@ -2162,7 +2522,7 @@ export default function ChatLayout() {
                           fontSize: 14
                         }}
                       >
-                        {theme === "dark" ? "🌞 Light Mode" : "🌙 Dark Mode"}
+                        {themeMode === "auto" ? "🌓 Auto Theme" : themeMode === "dark" ? "🌞 Light Mode" : "🌙 Dark Mode"}
                       </div>
                     
                       
@@ -2300,11 +2660,14 @@ export default function ChatLayout() {
                     });
 
                     localStreamRef.current = stream;
-                    if (localVideoRef.current) {
+                    
+                    // Video call setup
+                    if (callType === "video" && localVideoRef.current) {
                       localVideoRef.current.srcObject = stream;
                     }
+                    
                     setCallMode(callType);
-                    setCallStatus("connecting");
+                    setCallStatus("connected"); 
                     if (
                       !callSocketRef.current ||
                       callSocketRef.current.readyState !== WebSocket.OPEN
@@ -2460,15 +2823,60 @@ export default function ChatLayout() {
                           )}
 
 
-                          <div 
+                          <div
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              setShowReactions(msg.id);
+                            }}
+
+                            onTouchStart={(e) => {
+                              touchStartXRef.current = e.touches[0].clientX;
+                              touchMovedRef.current = false;
+
+                              longPressTimerRef.current = setTimeout(() => {
+                                // 🔥 LONG PRESS (no swipe happened)
+                                if (!touchMovedRef.current) {
+                                  setShowReactions(msg.id);
+                                }
+                              }, 500);
+                            }}
+
+                            onTouchMove={(e) => {
+                              const currentX = e.touches[0].clientX;
+                              const diff = currentX - touchStartXRef.current;
+
+                              if (Math.abs(diff) > 10) {
+                                touchMovedRef.current = true;
+                                clearTimeout(longPressTimerRef.current);
+                              }
+
+                              // 👉 SWIPE RIGHT TO REPLY
+                              if (!isOwn && diff > 80) {
+                                setReplyingTo(msg);
+                                clearTimeout(longPressTimerRef.current);
+                                touchStartXRef.current = 0;
+                              }
+                            }}
+
+                            onTouchEnd={() => {
+                              clearTimeout(longPressTimerRef.current);
+                              touchStartXRef.current = 0;
+                            }}
+
                             style={{
                               padding: '8px 12px',
                               borderRadius: '16px',
-                              backgroundColor: isOwn ? "#2563EB" : theme === "dark" ? "#1E293B" : "#E4E6EB",
-                              color: isOwn ? '#FFFFFF' : theme === "dark" ? "#FFFFFF" : "#000000",
-                              wordWrap: 'break-word',
-                              position: 'relative',
-                              maxWidth: '400px'
+                              backgroundColor: isOwn
+                                ? "#2563EB"
+                                : theme === "dark"
+                                ? "#1E293B"
+                                : "#E4E6EB",
+                              color: isOwn ? "#FFFFFF" : theme === "dark" ? "#FFFFFF" : "#000000",
+                              wordWrap: "break-word",
+                              position: "relative",
+                              maxWidth: "400px",
+                              cursor: "pointer",
+                              userSelect: "none"
                             }}
                           >
                             {/* DELETE BUTTON – only for own message */}
@@ -2498,6 +2906,57 @@ export default function ChatLayout() {
                               >
                                 x
                               </button>
+                            )}
+
+                            {/* 😍 REACTION POPUP */}
+                            {showReactions === msg.id && (
+                              <div
+                                onClick={(e) => e.stopPropagation()}
+                                style={{
+                                  position: 'absolute',
+                                  bottom: '-50px',
+                                  left: isOwn ? 'auto' : '0',
+                                  right: isOwn ? '0' : 'auto',
+                                  background: theme === "dark" ? "#1E293B" : "#FFFFFF",
+                                  borderRadius: '25px',
+                                  padding: '8px 12px',
+                                  display: 'flex',
+                                  gap: '8px',
+                                  boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                                  zIndex: 1000
+                                }}
+                              >
+                                {reactionEmojis.map(emoji => (
+                                  <button
+                                    key={emoji}
+                                    onClick={() => {
+                                      setMessageReactions(prev => ({
+                                        ...prev,
+                                        [msg.id]: emoji
+                                      }));
+                                      setShowReactions(null);
+                                    }}
+                                    style={{
+                                      width: '32px',
+                                      height: '32px',
+                                      border: 'none',
+                                      background: 'transparent',
+                                      fontSize: '20px',
+                                      cursor: 'pointer',
+                                      borderRadius: '50%',
+                                      transition: 'transform 0.2s'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.transform = 'scale(1.3)';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.transform = 'scale(1)';
+                                    }}
+                                  >
+                                    {emoji}
+                                  </button>
+                                ))}
+                              </div>
                             )}
 
                             {/* Attachment */}
@@ -2561,6 +3020,32 @@ export default function ChatLayout() {
                                     </div>
                                   </a>
                                 )}
+                              </div>
+                            )}
+
+                             {/* 💬 REPLIED MESSAGE */}
+                             {msg.reply_to && (
+                              <div style={{
+                                padding: '8px',
+                                borderRadius: '8px',
+                                backgroundColor: isOwn ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)',
+                                marginBottom: '8px',
+                                borderLeft: '3px solid #0084FF'
+                              }}>
+                                <div style={{
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  color: '#0084FF',
+                                  marginBottom: '2px'
+                                }}>
+                                  {msg.reply_to.sender}
+                                </div>
+                                <div style={{
+                                  fontSize: '12px',
+                                  opacity: 0.8
+                                }}>
+                                  {msg.reply_to.text}
+                                </div>
                               </div>
                             )}
                             
@@ -2682,6 +3167,57 @@ export default function ChatLayout() {
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              {/* 💬 REPLY PREVIEW */}
+              {replyingTo && (
+                <div style={{
+                  padding: '12px 20px',
+                  borderTop: theme === "dark" ? "1px solid #1E293B" : "1px solid #E4E6EB",
+                  backgroundColor: theme === "dark" ? "#0F172A" : "#F8F9FA",
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px'
+                }}>
+                  <div style={{
+                    flex: 1,
+                    borderLeft: '3px solid #0084FF',
+                    paddingLeft: '12px'
+                  }}>
+                    <div style={{
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      color: '#0084FF',
+                      marginBottom: '4px'
+                    }}>
+                      Replying to {replyingTo.sender.username}
+                    </div>
+                    <div style={{
+                      fontSize: '13px',
+                      color: theme === "dark" ? "#94A3B8" : "#65676B",
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis'
+                    }}>
+                      {replyingTo.text}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setReplyingTo(null)}
+                    style={{
+                      width: '28px',
+                      height: '28px',
+                      borderRadius: '50%',
+                      border: 'none',
+                      background: theme === "dark" ? "#1E293B" : "#E4E6EB",
+                      color: theme === "dark" ? "#E5E7EB" : "#1C1E21",
+                      cursor: 'pointer',
+                      fontSize: '16px'
                     }}
                   >
                     ✕
@@ -2899,38 +3435,112 @@ export default function ChatLayout() {
                   )}
                 </div>
 
-                {(messageInput.trim() || selectedFile) && (
-                  <button 
-                    onClick={handleSendMessage}
-                    disabled={sending || isBlocked}
-                      title="Send message"
+                {/* 🎤 VOICE RECORDING UI */}
+                {isRecording ? (
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    flex: 1
+                  }}>
+                    <div style={{
+                      width: '8px',
+                      height: '8px',
+                      borderRadius: '50%',
+                      background: '#ef4444',
+                      animation: 'pulse 1.5s infinite'
+                    }} />
+                    <div style={{
+                      fontSize: '14px',
+                      color: theme === "dark" ? "#E5E7EB" : "#1C1E21"
+                    }}>
+                      {Math.floor(recordingTime / 60)}:{String(recordingTime % 60).padStart(2, '0')}
+                    </div>
+                    
+                    <button
+                      onClick={cancelRecording}
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: '20px',
+                        border: 'none',
+                        background: '#ef4444',
+                        color: '#fff',
+                        cursor: 'pointer',
+                        fontSize: '14px'
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    
+                    <button
+                      onClick={stopRecording}
                       style={{
                         width: '36px',
                         height: '36px',
                         borderRadius: '50%',
                         border: 'none',
-                        backgroundColor: sending ? '#CED0D4' : '#0084FF',
-                        color: '#FFFFFF',
-                        cursor: sending ? 'not-allowed' : 'pointer',
-                        fontSize: '18px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        transition: 'background-color 0.15s'
+                        background: '#22c55e',
+                        color: '#fff',
+                        cursor: 'pointer',
+                        fontSize: '18px'
                       }}
-                      onMouseEnter={(e) => {
-                        if (!sending) e.currentTarget.style.backgroundColor = '#0077E6';
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!sending) e.currentTarget.style.backgroundColor = '#0084FF';
-                      }}
-                  >
-                      {sending ? '...' : '➤'}
-                  </button>
+                    >
+                      ➤
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {(messageInput.trim() || selectedFile) ? (
+                      <button 
+                        onClick={handleSendMessage}
+                        disabled={sending || followState.isBlocked}
+                        title="Send message"
+                        style={{
+                          width: '36px',
+                          height: '36px',
+                          borderRadius: '50%',
+                          border: 'none',
+                          backgroundColor: sending ? '#CED0D4' : '#0084FF',
+                          color: '#FFFFFF',
+                          cursor: sending ? 'not-allowed' : 'pointer',
+                          fontSize: '18px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          transition: 'background-color 0.15s'
+                        }}
+                      >
+                        {sending ? '...' : '➤'}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={startRecording}
+                        disabled={followState.isBlocked || !followState.isFollowing}
+                        title="Voice message"
+                        style={{
+                          width: '36px',
+                          height: '36px',
+                          borderRadius: '50%',
+                          border: 'none',
+                          backgroundColor: '#0084FF',
+                          color: '#FFFFFF',
+                          cursor: 'pointer',
+                          fontSize: '18px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                      >
+                        🎤
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             </>
-          ) : (
+          ) : (  
+                
+            
             <div style={{
               flex: 1,
               display: 'flex',
