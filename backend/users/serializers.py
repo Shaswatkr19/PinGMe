@@ -48,7 +48,7 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ["id", "username", "avatar", "avatar_url", "bio", "is_online", "last_seen", "last_seen_display", 
-                 "followers_count", "following_count", "is_following"]
+                 "followers_count", "following_count", "is_following", "is_blocked",]
 
     def get_is_online(self, obj):
         return bool(cache.get(f"user_online_{obj.id}"))
@@ -74,6 +74,12 @@ class UserSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.avatar.url)
             return obj.avatar.url
         return None
+
+    def get_is_blocked(self, obj):
+        request = self.context.get("request")
+        if request and request.user.is_authenticated:
+            return obj in request.user.blocked_users.all()
+        return False    
 
     def get_last_seen_display(self, obj):
         # 🟢 User is online

@@ -37,25 +37,26 @@ export default function ChatLayout() {
   const [isVideoReady, setIsVideoReady] = useState(false);
   const [selectedUserProfile, setSelectedUserProfile] = useState(null);
   const [showThemePicker, setShowThemePicker] = useState(false);
+  const [chatTheme, setChatTheme] = useState(null); 
 
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const recordingIntervalRef = useRef(null);
-
-  const [isBlocked, setIsBlocked] = useState(() => {
-    return localStorage.getItem("blocked") === "true";
-  });
-
-  
+ 
+  const touchMovedRef = useRef(false);        
+  const longPressTimerRef = useRef(null); 
+      
   const [messageReactions, setMessageReactions] = useState({});
   
 
   const [followState, setFollowState] = useState({
-    isFollowing: true,
+    isFollowing: false,
     isBlocked: false
   });
+
+  const { isBlocked, isFollowing } = followState;
 
   const [selectedThread, setSelectedThread] = useState(() => {
     const saved = localStorage.getItem("active_thread");
@@ -285,7 +286,36 @@ useEffect(() => {
   window.addEventListener('resize', checkMobile);
   return () => window.removeEventListener('resize', checkMobile);
 }, [selectedThread]);
-    
+
+
+  const refreshThreads = async () => {
+    try {
+      const res = await fetchThreads();
+      setThreads(res.data);
+
+      if (selectedThread) {
+        const updatedThread = res.data.find(
+          t => t.id === selectedThread.id
+        );
+
+        if (updatedThread) {
+          setSelectedThread(updatedThread);
+          localStorage.setItem(
+            "active_thread",
+            JSON.stringify(updatedThread)
+          );
+
+          // ✅ SINGLE SOURCE OF TRUTH
+          const otherUser = updatedThread.members.find(
+            m => m.id !== currentUser?.id
+          );
+        }
+      }
+    } catch (err) {
+      console.error("❌ Failed to refresh threads:", err);
+    }
+  };
+      
 
   const handleDeleteMessage = async (messageId) => {
     try {
@@ -385,6 +415,10 @@ useEffect(() => {
         type: "offer",
         data: offer,
       }));
+
+      if (callType === "video") {
+        setIsVideoReady(true);
+      }
   
       return;
     }
@@ -404,6 +438,12 @@ useEffect(() => {
         type: "answer",
         data: answer,
       }));
+
+      if (callMode === "video") {
+        setTimeout(() => {
+          setIsVideoReady(true);
+        }, 500);  
+      }
   
       return;
     }
@@ -527,19 +567,19 @@ useEffect(() => {
     setSelectedThread(thread);
     localStorage.setItem("active_thread", JSON.stringify(thread));
     setUserSearchQuery("");
-
+  
     if (isMobile) {
       setShowSidebar(false);
     }
   
-    // 🎨 chat theme
+    // Set chat theme
     if (thread.chat_theme) {
       setChatTheme(thread.chat_theme);
     } else {
       setChatTheme(null);
     }
   
-    // 🔥 MARK THREAD AS READ
+    // Mark thread as read
     try {
       await api.post(`/chat/thread/${thread.id}/read/`);
   
@@ -552,18 +592,6 @@ useEffect(() => {
       );
     } catch (err) {
       console.error("❌ Failed to mark thread as read", err);
-    }
-  
-    // 🚨🚨🚨 ADD THIS PART (VERY IMPORTANT)
-    const otherUser = thread.members.find(
-      m => m.id !== currentUser?.id
-    );
-  
-    if (otherUser) {
-      setFollowState({
-        isFollowing: !!otherUser.is_following,
-        isBlocked: !!otherUser.is_blocked,
-      });
     }
   };
   
@@ -859,15 +887,16 @@ useEffect(() => {
 
 
   const syncFollowState = (userId, isFollowing, isBlocked = false) => {
+    console.log("🔄 Syncing follow state:", { userId, isFollowing, isBlocked });  // ✅ ADDED
 
-    // 1️⃣ Chat Header + Profile Modal
+    // Update profile modal
     setSelectedUserProfile(prev =>
       prev && prev.id === userId
         ? { ...prev, is_following: isFollowing, is_blocked: isBlocked }
         : prev
     );
 
-    // 2️⃣ Thread list + sidebar
+    // Update threads
     setThreads(prev =>
       prev.map(thread => ({
         ...thread,
@@ -879,7 +908,7 @@ useEffect(() => {
       }))
     );
 
-    // 3️⃣ Active chat header
+    // Update selected thread
     setSelectedThread(prev =>
       prev
         ? {
@@ -893,12 +922,18 @@ useEffect(() => {
         : prev
     );
 
-    // 4️⃣ Local followState
+    // Update local follow state
     setFollowState({
       isFollowing,
       isBlocked
     });
   };
+
+  useEffect(() => {
+    console.log("🧠 followState:", followState);
+    console.log("Current:", currentUser?.username);
+    console.log("Target:", activeOtherUser?.username);
+  }, [followState]);
 
   // Send message function
   const handleSendMessage = async () => {
@@ -968,56 +1003,128 @@ useEffect(() => {
     }
   };
 
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      
-      mediaRecorderRef.current = recorder;
-      audioChunksRef.current = [];
-      
-      recorder.ondataavailable = (e) => {
+  // 🔥 COMPLETE REPLACEMENT - startRecording function (line ~945)
+
+const startRecording = async () => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    
+    // 🔥 Try different mimeTypes - browser compatibility
+    let mimeType = 'audio/webm';
+    if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+      mimeType = 'audio/webm;codecs=opus';
+    } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+      mimeType = 'audio/webm';
+    } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+      mimeType = 'audio/mp4';
+    }
+    
+    console.log("🎤 Using MIME type:", mimeType);
+    
+    const recorder = new MediaRecorder(stream, { mimeType });
+    
+    mediaRecorderRef.current = recorder;
+    audioChunksRef.current = [];
+    
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) {
+        console.log("📦 Chunk received:", e.data.size, "bytes");
         audioChunksRef.current.push(e.data);
-      };
+      }
+    };
+    
+    recorder.onstop = async () => {
+      console.log("🛑 Recording stopped");
+      console.log("📦 Total chunks:", audioChunksRef.current.length);
       
-      recorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        
-        // Send as file
-        const formData = new FormData();
-        formData.append("file", audioBlob, "voice-message.webm");
-        formData.append("text", "🎤 Voice message");
-        
-        try {
-          const response = await api.post(
-            `/chat/threads/${selectedThread.id}/media/`,
-            formData,
-            { headers: { "Content-Type": "multipart/form-data" } }
-          );
-          
-          setMessages(prev => [...prev, response.data]);
-        } catch (err) {
-          console.error("Failed to send voice message", err);
-        }
-        
-        // Cleanup
+      const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+      
+      console.log("🎵 Final blob size:", audioBlob.size);
+      
+      if (audioBlob.size === 0) {
+        alert("Recording failed. Please try again.");
         stream.getTracks().forEach(track => track.stop());
         setRecordingTime(0);
-      };
+        return;
+      }
+
+      // 🔥 BACKEND MIGHT EXPECT SPECIFIC FILENAME/EXTENSION
+      const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
+      const filename = `voice_${Date.now()}.${extension}`;
       
-      recorder.start();
-      setIsRecording(true);
+      const formData = new FormData();
+      formData.append("file", audioBlob, filename);
       
-      // Timer
-      recordingIntervalRef.current = setInterval(() => {
-        setRecordingTime(prev => prev + 1);
-      }, 1000);
+      // 🔥 CRITICAL: Backend might need this field
+      formData.append("text", "🎤 Voice message");
       
-    } catch (err) {
-      console.error("Mic access denied", err);
-      alert("Please allow microphone access");
-    }
-  };
+      // Debug FormData
+      console.log("📤 Sending FormData:");
+      for (let pair of formData.entries()) {
+        console.log(pair[0], pair[1]);
+      }
+      
+      try {
+        setSending(true);
+        
+        const response = await api.post(
+          `/chat/threads/${selectedThread.id}/media/`,
+          formData,
+          { 
+            headers: { 
+              "Content-Type": "multipart/form-data" 
+            },
+            timeout: 30000 // 30 second timeout
+          }
+        );
+        
+        console.log("✅ Voice sent:", response.data);
+        setMessages(prev => [...prev, response.data]);
+        
+        const threadsRes = await fetchThreads();
+        setThreads(threadsRes.data);
+        
+      } catch (err) {
+        console.error("❌ Voice send failed:", err);
+        console.error("Response status:", err.response?.status);
+        console.error("Response data:", err.response?.data);
+        console.error("Request config:", err.config);
+        
+        // Show detailed error
+        const errorMsg = err.response?.data?.error 
+          || err.response?.data?.detail
+          || err.response?.data?.message
+          || JSON.stringify(err.response?.data)
+          || "Failed to send voice message";
+        
+        alert(`Failed to send voice: ${errorMsg}`);
+      } finally {
+        setSending(false);
+      }
+      
+      // Cleanup
+      stream.getTracks().forEach(track => track.stop());
+      setRecordingTime(0);
+      audioChunksRef.current = [];
+    };
+    
+    // 🔥 Start with timeslice for consistent chunks
+    recorder.start(1000); // 1 second chunks
+    setIsRecording(true);
+    
+    console.log("🎤 Recording started");
+    
+    // Timer
+    recordingIntervalRef.current = setInterval(() => {
+      setRecordingTime(prev => prev + 1);
+    }, 1000);
+    
+  } catch (err) {
+    console.error("❌ Mic access error:", err);
+    alert("Microphone access denied. Please allow microphone in browser settings.");
+  }
+};
+
   
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
@@ -1192,6 +1299,22 @@ useEffect(() => {
       ...prev,
       chat_theme: theme,
     }));
+
+    if (chatSocketRef.current?.readyState === WebSocket.OPEN) {
+      chatSocketRef.current.send(JSON.stringify({
+        type: 'theme_change',
+        theme: theme
+      }));
+    }
+    
+    // In WebSocket onmessage, ADD:
+    if (data.type === "theme_change") {
+      setChatTheme(data.theme);
+      setSelectedThread(prev => prev ? {
+        ...prev,
+        chat_theme: data.theme
+      } : prev);
+    }
   };
 
   return (
@@ -1498,15 +1621,13 @@ useEffect(() => {
       )}
 
 
-      {callStatus === "connected" &&
-      callMode === "video" &&
-      isVideoReady && (
-        <div style={{
-          position: "fixed",
-          inset: 0,
-          background: "#000",
-          zIndex: 9998
-        }}>
+        {callStatus === "connected" && callMode === "video" && (
+          <div style={{
+            position: "fixed",
+            inset: 0,
+            background: "#000",
+            zIndex: 9998
+          }}>
           
           {/* Remote Video */}
           <video
@@ -2532,18 +2653,31 @@ useEffect(() => {
                         onClick={async () => {
                           if (!activeOtherUser) return;
 
+                          // ❌ SELF BLOCK PROTECTION
+                          if (activeOtherUser.username === currentUser?.username) {
+                            alert("You cannot block yourself");
+                            return;
+                          }
+
+                          setShowMenu(false); // ✅ menu pehle band
+
                           try {
                             if (!followState.isBlocked) {
-                              // 🚫 BLOCK
+                              // 🚫 BLOCK USER
+                              if (followState.isBlocked) {
+                                console.log("Already blocked");
+                                return;
+                              }
+
                               await blockUser(activeOtherUser.username);
 
                               syncFollowState(
                                 activeOtherUser.id,
-                                false,  // unfollow
-                                true    // blocked
+                                false, // unfollow
+                                true   // blocked
                               );
                             } else {
-                              // 🔓 UNBLOCK
+                              // 🔓 UNBLOCK USER
                               await unblockUser(activeOtherUser.username);
 
                               syncFollowState(
@@ -2553,39 +2687,72 @@ useEffect(() => {
                               );
                             }
 
-                            setShowMenu(false);
+                            await refreshThreads();
+
                           } catch (err) {
-                            console.error("Block/unblock failed", err);
+                            console.error("❌ Block/unblock failed:", err.response?.data);
+                            alert(err.response?.data?.error || "Action failed");
+                            refreshThreads(); // rollback
                           }
                         }}
                       />
-
 
                       <MenuItem
                         theme={theme}
                         label={followState.isFollowing ? "❌ Unfollow" : "✅ Follow"}
                         onClick={async () => {
-                          if (!activeOtherUser) return;
-
-                          const nextFollow = !followState.isFollowing;
+                          if (!activeOtherUser) {
+                            console.error("No active user found");
+                            return;
+                          }
 
                           try {
-                            if (nextFollow) {
-                              await api.post(`/auth/follow/${activeOtherUser.username}/`);
-                            } else {
+                            setShowMenu(false);  // ✅ CLOSE MENU FIRST
+                            
+                            if (followState.isFollowing) {
+                              // UNFOLLOW
+                              console.log("❌ Unfollowing user:", activeOtherUser.username);
                               await api.post(`/auth/unfollow/${activeOtherUser.username}/`);
+                              
+                              // ✅ UPDATE UI IMMEDIATELY
+                              syncFollowState(
+                                activeOtherUser.id,
+                                false,  // unfollowed
+                                false   // not blocked
+                              );
+
+                              await refreshThreads();
+                              
+                            } else {
+                              // FOLLOW
+                              console.log("✅ Following user:", activeOtherUser.username);
+                              await api.post(`/auth/follow/${activeOtherUser.username}/`);
+                              
+                              // ✅ UPDATE UI IMMEDIATELY
+                              syncFollowState(
+                                activeOtherUser.id,
+                                true,   // following
+                                false   // not blocked
+                              );
                             }
 
-                            // 🔥 CENTRAL SYNC
-                            syncFollowState(
-                              activeOtherUser.id,
-                              nextFollow,
-                              !nextFollow // unfollow → block
-                            );
+                            await refreshThreads();
 
-                            setShowMenu(false);
+                            // ✅ REFRESH FROM SERVER AFTER DELAY
+                            setTimeout(() => refreshThreads(), 500);
+
                           } catch (err) {
-                            console.error("Follow toggle failed", err);
+                            console.error("❌ Follow toggle failed:", err);
+                            console.error("Error response:", err.response?.data);
+                            
+                            const errorMsg = err.response?.data?.error 
+                              || err.response?.data?.detail 
+                              || err.message;
+                            
+                            alert(`Action failed: ${errorMsg}`);
+                            
+                            // ✅ REVERT UI ON ERROR
+                            refreshThreads();
                           }
                         }}
                       />
@@ -2661,17 +2828,18 @@ useEffect(() => {
 
                     localStreamRef.current = stream;
                     
-                    // Video call setup
-                    if (callType === "video" && localVideoRef.current) {
-                      localVideoRef.current.srcObject = stream;
+                    if (callType === "video") {
+                      setCallMode("video");
+                      if (localVideoRef.current) {
+                        localVideoRef.current.srcObject = stream;
+                      }
+                    } else {
+                      setCallMode("audio");
                     }
                     
-                    setCallMode(callType);
                     setCallStatus("connected"); 
-                    if (
-                      !callSocketRef.current ||
-                      callSocketRef.current.readyState !== WebSocket.OPEN
-                    ) {
+                    
+                    if (!callSocketRef.current || callSocketRef.current.readyState !== WebSocket.OPEN) {
                       alert("Call connection not ready");
                       return;
                     }

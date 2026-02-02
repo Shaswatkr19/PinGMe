@@ -241,11 +241,16 @@ class MediaMessageUploadView(APIView):
             "image/webp",
             "video/mp4",
             "application/pdf",
+            "audio/webm",
+            "audio/ogg",
+            "audio/mpeg",  # mp3
+            "audio/mp4",   # m4a
+            "audio/wav",
         ]
 
         if file.content_type not in ALLOWED_TYPES:
             return Response(
-                {"error": "Unsupported file type"},
+                {"error": f"Unsupported file type: {file.content_type}"},  # 🔥 Better error
                 status=status.HTTP_400_BAD_REQUEST
             )
 

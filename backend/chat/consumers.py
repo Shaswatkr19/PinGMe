@@ -167,6 +167,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
         data = json.loads(text_data)
         event_type = data.get("type")
 
+        if data.get('type') == 'theme_change':
+            await self.channel_layer.group_send(
+                self.thread_group_name,
+                {
+                    'type': 'theme_update',
+                    'theme': data.get('theme')
+                }
+            )
+
         # Typing
         if event_type == "typing":
             await self.channel_layer.group_send(
@@ -253,6 +262,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
             }))
         except:
             pass  # socket already closed
+
+    async def theme_update(self, event):
+        await self.send(text_data=json.dumps({
+            'type': 'theme_change',
+            'theme': event['theme']
+        }))    
 
     # =============================
     # DB HELPERS
