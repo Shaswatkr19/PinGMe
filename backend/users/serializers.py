@@ -43,7 +43,7 @@ class UserSerializer(serializers.ModelSerializer):
     followers_count = serializers.SerializerMethodField()
     following_count = serializers.SerializerMethodField()
     is_following = serializers.SerializerMethodField()
-    # is_blocked = serializers.SerializerMethodField()   # ✅ MISSING LINE
+    is_blocked = serializers.SerializerMethodField()  
     avatar_url = serializers.SerializerMethodField()
 
     class Meta:
@@ -60,6 +60,7 @@ class UserSerializer(serializers.ModelSerializer):
             "followers_count",
             "following_count",
             "is_following",
+            "is_blocked",
         ]
 
     def get_is_online(self, obj):

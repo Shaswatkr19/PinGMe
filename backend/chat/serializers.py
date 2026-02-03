@@ -11,6 +11,8 @@ User = get_user_model()
 class ThreadUserSerializer(serializers.ModelSerializer):
     avatar_url = serializers.SerializerMethodField()
     is_online = serializers.SerializerMethodField()
+    is_following = serializers.SerializerMethodField()
+    is_blocked = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -19,10 +21,24 @@ class ThreadUserSerializer(serializers.ModelSerializer):
             "username",
             "avatar_url",
             "is_online",
+            "is_following",
+            "is_blocked",
         ]
 
     def get_is_online(self, obj):
         return bool(cache.get(f"user_online_{obj.id}"))
+
+    def get_is_following(self, obj):
+        request = self.context.get("request")
+        if request and request.user.is_authenticated:
+            return request.user.following.filter(id=obj.id).exists()
+        return False
+
+    def get_is_blocked(self, obj):
+        request = self.context.get("request")
+        if request and request.user.is_authenticated:
+            return request.user.blocked_users.filter(id=obj.id).exists()
+        return False
 
     def get_avatar_url(self, obj):
         request = self.context.get("request")
@@ -125,7 +141,7 @@ class MessageSerializer(serializers.ModelSerializer):
         return data
 
 class ThreadSerializer(serializers.ModelSerializer):
-    members = ThreadUserSerializer(many=True, read_only=True)
+    members = serializers.SerializerMethodField()
     last_message = serializers.SerializerMethodField()
     unread_count = serializers.SerializerMethodField()
     is_blocked = serializers.SerializerMethodField()
@@ -142,6 +158,13 @@ class ThreadSerializer(serializers.ModelSerializer):
             'chat_theme',
             'is_blocked',
         ]
+
+    def get_members(self, obj):
+        return ThreadUserSerializer(
+            obj.members.all(),
+            many=True,
+            context=self.context   # 🔥 THIS IS THE KEY
+        ).data
 
     def get_last_message(self, obj):
         msg = obj.messages.order_by('-created_at').first()

@@ -10,9 +10,28 @@ from rest_framework.permissions import IsAuthenticated
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.shortcuts import get_object_or_404
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
 
 
+class MarkThreadReadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, thread_id):
+        thread = get_object_or_404(Thread, id=thread_id)
+
+        if request.user not in thread.members.all():
+            return Response({"error": "Access denied"}, status=403)
+
+        Message.objects.filter(
+            thread=thread
+        ).exclude(
+            sender=request.user
+        ).exclude(
+            read_by=request.user
+        ).update()
+
+        return Response({"success": True})
+        
 @api_view(['POST'])
 def react_to_message(request, message_id):
     """Add or remove reaction to a message"""
@@ -339,21 +358,21 @@ class MediaMessageUploadView(APIView):
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-class MarkThreadReadView(APIView):
-    permission_classes = [IsAuthenticated]
+# class MarkThreadReadView(APIView):
+#     permission_classes = [IsAuthenticated]
 
-    def post(self, request, thread_id):
-        thread = get_object_or_404(Thread, id=thread_id)
+#     def post(self, request, thread_id):
+#         thread = get_object_or_404(Thread, id=thread_id)
 
-        unread_messages = Message.objects.filter(
-            thread=thread
-        ).exclude(
-            read_by=request.user
-        ).exclude(
-            sender=request.user
-        )
+#         unread_messages = Message.objects.filter(
+#             thread=thread
+#         ).exclude(
+#             read_by=request.user
+#         ).exclude(
+#             sender=request.user
+#         )
 
-        for msg in unread_messages:
-            msg.read_by.add(request.user)
+#         for msg in unread_messages:
+#             msg.read_by.add(request.user)
 
-        return Response({"success": True})        
+#         return Response({"success": True})        

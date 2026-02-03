@@ -58,6 +58,9 @@ export default function ChatLayout() {
     isBlocked: false
   });
 
+  const [isLoadingFollowState, setIsLoadingFollowState] = useState(true);
+
+
   const { isBlocked, isFollowing } = followState;
 
   const [selectedThread, setSelectedThread] = useState(() => {
@@ -306,7 +309,11 @@ useEffect(() => {
       const res = await fetchThreads();
       setThreads(res.data);
 
-      if (!selectedThread || !currentUser) return;
+      // ✅ Check both conditions
+      if (!selectedThread || !currentUser) {
+        console.log("⚠️ Skip followState update - missing data");
+        return;
+      }
 
       const updatedThread = res.data.find(
         t => t.id === selectedThread.id
@@ -314,27 +321,29 @@ useEffect(() => {
 
       if (!updatedThread) return;
 
-      // ✅ update selected thread
-      setSelectedThread(updatedThread);
-      localStorage.setItem(
-        "active_thread",
-        JSON.stringify(updatedThread)
-      );
-
-      // ✅ SINGLE SOURCE OF TRUTH (follow / block)
-      const otherUser = updatedThread.members.find(
+      // ✅ Update followState from backend
+      const otherUser = updatedThread.members?.find(
         m => m.id !== currentUser.id
       );
 
       if (otherUser) {
+        console.log("🔄 refreshThreads - updating followState:", {
+          user: otherUser.username,
+          following: otherUser.is_following,
+          blocked: otherUser.is_blocked
+        });
+        
         setFollowState({
           isFollowing: !!otherUser.is_following,
-          isBlocked: !! selectedThread.is_blocked,
+          isBlocked: !!otherUser.is_blocked,
         });
       }
 
+      setSelectedThread(updatedThread);
+      localStorage.setItem("active_thread", JSON.stringify(updatedThread));
+
     } catch (err) {
-      console.error("❌ Failed to refresh threads:", err);
+      console.error("❌ refreshThreads error:", err);
     }
   };
         
@@ -572,23 +581,138 @@ useEffect(() => {
 
   // Fetch threads on mount
   useEffect(() => {
-    fetchThreads()
-      .then((res) => {
-        console.log("✅ Threads loaded:", res.data);
-        setThreads(res.data);
-      })
-      .catch((err) => {
-        console.error("❌ Thread fetch error:", err);
+    const initializeApp = async () => {
+      try {
+        setIsLoadingFollowState(true); // ✅ START LOADING
+        
+        // STEP 1: Load user
+        const userRes = await getCurrentUser();
+        setCurrentUser(userRes.data);
+        console.log("✅ User loaded:", userRes.data.username);
+        
+        // STEP 2: Load threads
+        const threadsRes = await fetchThreads();
+        console.log("✅ Threads loaded:", threadsRes.data);
+        setThreads(threadsRes.data);
+        
+        // STEP 3: Sync followState if thread is already selected
+        const savedThread = localStorage.getItem("active_thread");
+        if (savedThread) {
+          const parsed = JSON.parse(savedThread);
+          const matchingThread = threadsRes.data.find(t => t.id === parsed.id);
+          
+          if (matchingThread) {
+            const otherUser = matchingThread.members?.find(
+              m => m.id !== userRes.data.id
+            );
+            
+            if (otherUser) {
+              console.log("🔄 Initial sync followState:");
+              console.log("  → User:", otherUser.username);
+              console.log("  → is_following from backend:", otherUser.is_following);
+              console.log("  → is_blocked from backend:", otherUser.is_blocked);
+              
+              setFollowState({
+                isFollowing: !!otherUser.is_following,
+                isBlocked: !!otherUser.is_blocked
+              });
+            }
+          }
+        }
+        
+        setIsLoadingFollowState(false); // ✅ DONE LOADING
+        
+      } catch (err) {
+        console.error("❌ Init error:", err);
+        setIsLoadingFollowState(false); // ✅ STOP LOADING ON ERROR
         if (err.response?.status === 401) {
           handleLogout();
         }
-      });
+      }
+    };
+    
+    initializeApp();
   }, []);
+
+  // 🔄 SYNC followState when threads update
+useEffect(() => {
+  // Wait for all data
+  if (!selectedThread?.id || !currentUser?.id || !threads || threads.length === 0) {
+    console.log("⚠️ Skip followState sync - missing data", {
+      hasThread: !!selectedThread?.id,
+      hasUser: !!currentUser?.id,
+      threadsCount: threads?.length || 0
+    });
+    return;
+  }
+
+  // Find current thread in updated threads list
+  const updatedThread = threads.find(t => t.id === selectedThread.id);
+  
+  if (!updatedThread) {
+    console.log("⚠️ Selected thread not found in threads list");
+    return;
+  }
+
+  // Get other user
+  const otherUser = updatedThread.members?.find(m => m.id !== currentUser.id);
+  
+  if (!otherUser) {
+    console.log("⚠️ Other user not found in thread members");
+    return;
+  }
+
+  const newFollowState = {
+    isFollowing: !!otherUser.is_following,
+    isBlocked: !!otherUser.is_blocked
+  };
+
+  console.log("🔄 Auto-sync followState from threads:", {
+    user: otherUser.username,
+    following: newFollowState.isFollowing,  // ✅ ACTUAL VALUE
+    blocked: newFollowState.isBlocked,
+    threadId: selectedThread.id,
+    rawBackendData: {
+      is_following: otherUser.is_following,
+      is_blocked: otherUser.is_blocked
+    }
+  });
+  // Update state
+  setFollowState(newFollowState);
+
+  // Also update selectedThread to keep it in sync
+  setSelectedThread(updatedThread);
+  localStorage.setItem("active_thread", JSON.stringify(updatedThread));
+
+}, [threads, selectedThread?.id, currentUser?.id]); 
 
   const handleThreadSelect = async (thread) => {
     setSelectedThread(thread);
     localStorage.setItem("active_thread", JSON.stringify(thread));
     setUserSearchQuery("");
+  
+    // ✅ Safety check
+    if (!currentUser) {
+      console.error("❌ handleThreadSelect: currentUser not loaded yet!");
+      return;
+    }
+  
+    const otherUser = thread.members?.find(
+      m => m.id !== currentUser.id
+    );
+  
+    if (otherUser) {
+      console.log("✅ handleThreadSelect - setting followState:", {
+        user: otherUser.username,
+        following: otherUser.is_following,
+        blocked: otherUser.is_blocked
+      });
+      
+      setFollowState({
+        isFollowing: !!otherUser.is_following,
+        isBlocked: !!otherUser.is_blocked,
+      });
+    }
   
     if (isMobile) {
       setShowSidebar(false);
@@ -616,6 +740,7 @@ useEffect(() => {
       console.error("❌ Failed to mark thread as read", err);
     }
   };
+  
   
   const handleFollowUpdate = () => {
     // Refresh threads after follow/unfollow
@@ -696,10 +821,6 @@ useEffect(() => {
         }
       });
   };
-
-  useEffect(() => {
-    refreshCurrentUser();
-  }, []);
 
   // Save theme to localStorage when it changes
   useEffect(() => {
@@ -918,54 +1039,97 @@ useEffect(() => {
 
 
   const syncFollowState = (userId, isFollowing, isBlocked = false) => {
-    console.log("🔄 Syncing follow state:", { userId, isFollowing, isBlocked });  // ✅ ADDED
+    console.log("🔄 Syncing follow state:", { userId, isFollowing, isBlocked });
 
-    // Update profile modal
+    // 1️⃣ Update profile modal
     setSelectedUserProfile(prev =>
       prev && prev.id === userId
         ? { ...prev, is_following: isFollowing, is_blocked: isBlocked }
         : prev
     );
 
-    // Update threads
+    // 2️⃣ Update threads
     setThreads(prev =>
-      prev.map(thread => ({
-        ...thread,
-        members: thread.members.map(m =>
+      prev.map(thread => {
+        const hasUser = thread.members.some(m => m.id === userId);
+        if (!hasUser) return thread;
+
+        return {
+          ...thread,
+          is_blocked: isBlocked,
+          members: thread.members.map(m =>
+            m.id === userId
+              ? { ...m, is_following: isFollowing }
+              : m
+          )
+        };
+      })
+    );
+
+    // 3️⃣ Update selected thread
+    setSelectedThread(prev => {
+      if (!prev) return prev;
+
+      const hasUser = prev.members.some(m => m.id === userId);
+      if (!hasUser) return prev;
+
+      return {
+        ...prev,
+        is_blocked: isBlocked,
+        members: prev.members.map(m =>
           m.id === userId
-            ? { ...m, is_following: isFollowing, is_blocked: isBlocked }
+            ? { ...m, is_following: isFollowing }
             : m
         )
-      }))
-    );
+      };
+    });
 
-    // Update selected thread
-    setSelectedThread(prev =>
-      prev
-        ? {
-            ...prev,
-            members: prev.members.map(m =>
-              m.id === userId
-                ? { ...m, is_following: isFollowing, is_blocked: isBlocked }
-                : m
-            )
-          }
-        : prev
-    );
-
-    // Update local follow state
+    
     setFollowState({
       isFollowing,
-      isBlocked
+      isBlocked,
     });
   };
 
-  useEffect(() => {
-    console.log("🧠 followState:", followState);
-    console.log("Current:", currentUser?.username);
-    console.log("Target:", activeOtherUser?.username);
-  }, [followState]);
 
+  const handleBlockToggle = async (targetUser) => {
+    if (!currentUser?.id) return;
+    if (targetUser.id === currentUser.id) return;
+  
+    setShowMenu(false);
+  
+    try {
+      if (!followState.isBlocked) {
+        await blockUser(targetUser.username);
+  
+        syncFollowState(targetUser.id, false, true);
+      } else {
+        await unblockUser(targetUser.username);
+  
+        syncFollowState(targetUser.id, false, false);
+      }
+  
+      await refreshThreads();
+  
+    } catch (err) {
+      const msg = err.response?.data?.error || "";
+  
+      // ✅ IMPORTANT PART
+      if (msg.includes("already blocked")) {
+        syncFollowState(targetUser.id, false, true);
+        return;
+      }
+  
+      if (msg.includes("not blocked")) {
+        syncFollowState(targetUser.id, false, false);
+        return;
+      }
+  
+      console.error("❌ Block/unblock failed:", err.response?.data || err);
+      alert("Action failed");
+      await refreshThreads();
+    }
+  };
   // Send message function
   const handleSendMessage = async () => {
     if ((!messageInput.trim() && !selectedFile) || !selectedThread || sending) return;
@@ -1330,27 +1494,15 @@ const startRecording = async () => {
     m => m.id !== currentUser?.id
   );
 
-  // 🔥 AUTO SYNC followState FROM BACKEND (THREAD CHANGE / REFRESH)
+
   useEffect(() => {
-    if (!selectedThread || !currentUser) return;
-
-    const otherUser = selectedThread.members?.find(
-      m => m.id !== currentUser.id
-    );
-
-    if (!otherUser) return;
-
-    console.log("🔁 followState synced from backend:", {
-      is_following: otherUser.is_following,
-      is_blocked: selectedThread.is_blocked,
-    });
-
-    setFollowState({
-      isFollowing: !!otherUser.is_following,
-      isBlocked: !! selectedThread.is_blocked,
-    });
-  }, [selectedThread, currentUser]);
-
+    if (!currentUser) return;
+    console.log("🧠 followState:");
+    console.log("  → isFollowing:", followState.isFollowing);
+    console.log("  → isBlocked:", followState.isBlocked);
+    console.log("  → Current user:", currentUser.username);
+    console.log("  → Target user:", activeOtherUser?.username);
+  }, [followState, currentUser, activeOtherUser]);
 
   const themeData = selectedThread?.chat_theme;
 
@@ -1489,18 +1641,30 @@ const startRecording = async () => {
               {/* Action Buttons */}
               <div className="flex gap-3 mt-6 w-full">
 
-                {selectedUserProfile?.id !== currentUser?.id && (
+              {selectedUserProfile?.id !== currentUser?.id && (
                 <>
                   {selectedUserProfile.is_following ? (
                     <button
                       onClick={async () => {
                         try {
                           await api.post(`/auth/unfollow/${selectedUserProfile.username}/`);
-                          syncFollowState(selectedUserProfile.id, false, false);
-                          const res = await api.get(`/auth/search/?q=${selectedUserProfile.username}`);
-                          setSelectedUserProfile(res.data[0]);
+                          
+                          // ✅ Update UI immediately
+                          syncFollowState(selectedUserProfile.id, false, selectedUserProfile.is_blocked || false);
+                          
+                          // ✅ Update modal
+                          setSelectedUserProfile(prev => ({
+                            ...prev,
+                            is_following: false
+                          }));
+                          
+                          // ✅ Refresh threads
+                          await refreshThreads();
+                          
                         } catch (err) {
                           console.error("Unfollow failed", err);
+                          alert(err.response?.data?.error || "Failed to unfollow");
+                          await refreshThreads(); // Revert on error
                         }
                       }}
                       className="flex-1 py-2 rounded-lg bg-slate-700 text-white font-semibold hover:bg-slate-600 transition"
@@ -1512,11 +1676,23 @@ const startRecording = async () => {
                       onClick={async () => {
                         try {
                           await api.post(`/auth/follow/${selectedUserProfile.username}/`);
+                          
+                          // ✅ Update UI immediately
                           syncFollowState(selectedUserProfile.id, true, false);
-                          const res = await api.get(`/auth/search/?q=${selectedUserProfile.username}`);
-                          setSelectedUserProfile(res.data[0]);
+                          
+                          // ✅ Update modal
+                          setSelectedUserProfile(prev => ({
+                            ...prev,
+                            is_following: true
+                          }));
+                          
+                          // ✅ Refresh threads
+                          await refreshThreads();
+                          
                         } catch (err) {
                           console.error("Follow failed", err);
+                          alert(err.response?.data?.error || "Failed to follow");
+                          await refreshThreads(); // Revert on error
                         }
                       }}
                       className="flex-1 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold hover:opacity-90 transition"
@@ -1535,7 +1711,8 @@ const startRecording = async () => {
                     Message
                   </button>
                 </>
-              )}  
+              )}
+
               </div>
             </div>
           </div>
@@ -2717,44 +2894,9 @@ const startRecording = async () => {
                       <MenuItem
                         theme={theme}
                         label={followState.isBlocked ? "🔓 Unblock User" : "🚫 Block User"}
-                        onClick={async () => {
+                        onClick={() => {
                           if (!activeOtherUser) return;
-
-                          if (activeOtherUser.id === currentUser.id) {
-                            alert("You cannot block yourself");
-                            return;
-                          }
-
-                          setShowMenu(false);
-
-                          try {
-                            if (!followState.isBlocked) {
-                              // 🚫 BLOCK
-                              await blockUser(activeOtherUser.username);
-
-                              syncFollowState(
-                                activeOtherUser.id,
-                                false, // unfollow
-                                true   // blocked
-                              );
-                            } else {
-                              // 🔓 UNBLOCK
-                              await unblockUser(activeOtherUser.username);
-
-                              syncFollowState(
-                                activeOtherUser.id,
-                                false,
-                                false
-                              );
-                            }
-
-                            await refreshThreads();
-
-                          } catch (err) {
-                            console.error("❌ Block/unblock failed:", err.response?.data);
-                            alert(err.response?.data?.error || "Action failed");
-                            refreshThreads();
-                          }
+                          handleBlockToggle(activeOtherUser);
                         }}
                       />
 
@@ -2763,63 +2905,58 @@ const startRecording = async () => {
                         label={followState.isFollowing ? "❌ Unfollow" : "✅ Follow"}
                         onClick={async () => {
                           if (!activeOtherUser) {
-                            console.error("No active user found");
+                            console.error("❌ No active user");
+                            return;
+                          }
+
+                          if (!currentUser) {
+                            console.error("❌ currentUser not loaded");
+                            alert("Please wait, app is loading...");
+                            return;
+                          }
+
+                          // Block check
+                          if (followState.isBlocked) {
+                            alert("Please unblock this user first");
+                            setShowMenu(false);
                             return;
                           }
 
                           try {
-                            setShowMenu(false);  // ✅ CLOSE MENU FIRST
+                            setShowMenu(false);
                             
                             if (followState.isFollowing) {
                               // UNFOLLOW
-                              console.log("❌ Unfollowing user:", activeOtherUser.username);
+                              console.log("❌ Unfollowing:", activeOtherUser.username);
                               await api.post(`/auth/unfollow/${activeOtherUser.username}/`);
                               
-                              // ✅ UPDATE UI IMMEDIATELY
-                              syncFollowState(
-                                activeOtherUser.id,
-                                false,  // unfollowed
-                                false   // not blocked
-                              );
+                              syncFollowState(activeOtherUser.id, false, false);
 
-                              await refreshThreads();
-
-                            if (followState.isBlocked) {
-                              alert("Unblock user first");
-                              return;
-                            }  
-
-                              
                             } else {
                               // FOLLOW
-                              console.log("✅ Following user:", activeOtherUser.username);
+                              console.log("✅ Following:", activeOtherUser.username);
                               await api.post(`/auth/follow/${activeOtherUser.username}/`);
                               
-                              // ✅ UPDATE UI IMMEDIATELY
-                              syncFollowState(
-                                activeOtherUser.id,
-                                true,   // following
-                                false   // not blocked
-                              );
+                              syncFollowState(activeOtherUser.id, true, false);
                             }
 
-                            await refreshThreads();
-
-                            // ✅ REFRESH FROM SERVER AFTER DELAY
-                            setTimeout(() => refreshThreads(), 500);
+                            // ✅ SINGLE refresh with currentUser check
+                            setTimeout(() => {
+                              if (currentUser) {
+                                refreshThreads();
+                              } else {
+                                console.warn("⚠️ Skipping refresh - no currentUser");
+                              }
+                            }, 500);
 
                           } catch (err) {
-                            console.error("❌ Follow toggle failed:", err);
-                            console.error("Error response:", err.response?.data);
+                            console.error("❌ Follow failed:", err);
+                            alert(err.response?.data?.error || "Action failed");
                             
-                            const errorMsg = err.response?.data?.error 
-                              || err.response?.data?.detail 
-                              || err.message;
-                            
-                            alert(`Action failed: ${errorMsg}`);
-                            
-                            // ✅ REVERT UI ON ERROR
-                            refreshThreads();
+                            // Revert
+                            if (currentUser) {
+                              await refreshThreads();
+                            }
                           }
                         }}
                       />
@@ -3609,10 +3746,17 @@ const startRecording = async () => {
               }}>
                 <button 
                   onClick={() => {
-                    if (followState.isBlocked || !followState.isFollowing) return;
+                    if (isLoadingFollowState || followState.isBlocked || !followState.isFollowing) return;
                     fileInputRef.current.click();
                   }}
-                  title={isBlocked ? "You blocked this user" : "Attach file"}
+                  disabled={isLoadingFollowState}
+                  title={
+                    isLoadingFollowState 
+                      ? "Loading..." 
+                      : isBlocked 
+                        ? "You blocked this user" 
+                        : "Attach file"
+                  }
                   style={{
                     width: '36px',
                     height: '36px',
@@ -3621,7 +3765,7 @@ const startRecording = async () => {
                     backgroundColor: 'transparent',
                     cursor: isBlocked ? 'not-allowed' : 'pointer',
                     fontSize: '20px',
-                    opacity: isBlocked ? 0.4 : 1,
+                    opacity: isLoadingFollowState ? 0.4 : (isBlocked ? 0.4 : 1),
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -3672,13 +3816,15 @@ const startRecording = async () => {
                   onChange={handleTyping}
                   onKeyPress={handleKeyPress}
                   placeholder={
-                    followState.isBlocked
-                      ? "You blocked this user"
-                      : !followState.isFollowing
-                        ? "Follow user to send message"
-                        : "Type a message..."
+                    isLoadingFollowState
+                      ? "Loading..."                       
+                      : followState.isBlocked
+                        ? "You blocked this user"
+                        : !followState.isFollowing
+                          ? "Follow user to send message"
+                          : "Type a message..."
                   }
-                  disabled={sending || followState.isBlocked || !followState.isFollowing}
+                  disabled={sending || followState.isBlocked || !followState.isFollowing || isLoadingFollowState}
                   style={{
                     flex: 1,
                     padding: "10px 16px",
@@ -3726,9 +3872,10 @@ const startRecording = async () => {
                   {/* Emoji Button */}
                   <button
                     onClick={() => {
-                      if (followState.isBlocked || !followState.isFollowing) return;
+                      if (isLoadingFollowState || followState.isBlocked || !followState.isFollowing) return;
                       setShowEmojiPicker(prev => !prev);
                     }}
+                    disabled={isLoadingFollowState}
                     title={isBlocked ? "You blocked this user" : "Add emoji"}
                     style={{
                       width: '36px',
