@@ -14,6 +14,62 @@ from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
 from django.core.mail import send_mail
 from django.conf import settings
+from rest_framework.decorators import api_view, permission_classes
+from django.shortcuts import get_object_or_404
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def follow_user(request, username):
+    user = get_object_or_404(User, username=username)
+
+    request.user.blocked_users.remove(user)
+    request.user.following.add(user)
+
+    return Response({
+        "success": True,
+        "is_following": True,
+        "is_blocked": False
+    })
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def unfollow_user(request, username):
+    user = get_object_or_404(User, username=username)
+
+    request.user.following.remove(user)
+
+    return Response({
+        "success": True,
+        "is_following": False,
+        "is_blocked": False
+    })
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def block_user(request, username):
+    user = get_object_or_404(User, username=username)
+
+    request.user.following.remove(user)
+    request.user.blocked_users.add(user)
+
+    return Response({
+        "success": True,
+        "is_following": False,
+        "is_blocked": True
+    }) 
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def unblock_user(request, username):
+    user = get_object_or_404(User, username=username)
+
+    request.user.blocked_users.remove(user)
+
+    return Response({
+        "success": True,
+        "is_following": False,
+        "is_blocked": False
+    })       
 
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()

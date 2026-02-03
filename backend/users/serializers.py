@@ -43,31 +43,47 @@ class UserSerializer(serializers.ModelSerializer):
     followers_count = serializers.SerializerMethodField()
     following_count = serializers.SerializerMethodField()
     is_following = serializers.SerializerMethodField()
+    # is_blocked = serializers.SerializerMethodField()   # ✅ MISSING LINE
     avatar_url = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = User
-        fields = ["id", "username", "avatar", "avatar_url", "bio", "is_online", "last_seen", "last_seen_display", 
-                 "followers_count", "following_count", "is_following", "is_blocked",]
+        fields = [
+            "id",
+            "username",
+            "avatar",
+            "avatar_url",
+            "bio",
+            "is_online",
+            "last_seen",
+            "last_seen_display",
+            "followers_count",
+            "following_count",
+            "is_following",
+        ]
 
     def get_is_online(self, obj):
         return bool(cache.get(f"user_online_{obj.id}"))
-    
+
     def get_followers_count(self, obj):
         return obj.followers.count()
-    
+
     def get_following_count(self, obj):
         return obj.following.count()
-    
+
     def get_is_following(self, obj):
-        """Check if current user follows this user"""
         request = self.context.get("request")
         if request and request.user.is_authenticated:
             return obj in request.user.following.all()
         return False
-    
+
+    def get_is_blocked(self, obj):
+        request = self.context.get("request")
+        if request and request.user.is_authenticated:
+            return obj in request.user.blocked_users.all()
+        return False
+
     def get_avatar_url(self, obj):
-        """Return full URL for avatar"""
         if obj.avatar:
             request = self.context.get("request")
             if request:
@@ -75,37 +91,24 @@ class UserSerializer(serializers.ModelSerializer):
             return obj.avatar.url
         return None
 
-    def get_is_blocked(self, obj):
-        request = self.context.get("request")
-        if request and request.user.is_authenticated:
-            return obj in request.user.blocked_users.all()
-        return False    
-
     def get_last_seen_display(self, obj):
-        # 🟢 User is online
         if obj.is_online:
             return "Online"
 
         if not obj.last_seen:
             return "Offline"
 
-        now = timezone.now()
-        diff = now - obj.last_seen
-
+        diff = timezone.now() - obj.last_seen
         seconds = diff.total_seconds()
 
         if seconds < 60:
             return "Last seen just now"
         elif seconds < 3600:
-            minutes = int(seconds // 60)
-            return f"Last seen {minutes} min ago"
+            return f"Last seen {int(seconds//60)} min ago"
         elif seconds < 86400:
-            hours = int(seconds // 3600)
-            return f"Last seen {hours} hour ago"
+            return f"Last seen {int(seconds//3600)} hour ago"
         else:
-            days = int(seconds // 86400)
-            return f"Last seen {days} day ago"    
-
+            return f"Last seen {int(seconds//86400)} day ago"
 
 class UpdateProfileSerializer(serializers.ModelSerializer):
     class Meta:

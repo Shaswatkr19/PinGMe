@@ -1,11 +1,37 @@
 from rest_framework import serializers
+from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from users.serializers import UserSerializer
 from .models import Thread, Message
 import mimetypes
 
+User = get_user_model()
+
+
+class ThreadUserSerializer(serializers.ModelSerializer):
+    avatar_url = serializers.SerializerMethodField()
+    is_online = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "username",
+            "avatar_url",
+            "is_online",
+        ]
+
+    def get_is_online(self, obj):
+        return bool(cache.get(f"user_online_{obj.id}"))
+
+    def get_avatar_url(self, obj):
+        request = self.context.get("request")
+        if obj.avatar and request:
+            return request.build_absolute_uri(obj.avatar.url)
+        return None
 
 class MessageSerializer(serializers.ModelSerializer):
-    sender = UserSerializer(read_only=True)
+    sender = ThreadUserSerializer(read_only=True)
     delivered_count = serializers.SerializerMethodField()
     read_count = serializers.SerializerMethodField()
     delivery_status = serializers.SerializerMethodField()  
@@ -32,6 +58,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "file_size",
             "file_type",
             "delivery_status",
+            "reaction"
             
         ]
         read_only_fields = ['sender', 'created_at', 'thread']
@@ -98,7 +125,7 @@ class MessageSerializer(serializers.ModelSerializer):
         return data
 
 class ThreadSerializer(serializers.ModelSerializer):
-    members = UserSerializer(many=True, read_only=True)
+    members = ThreadUserSerializer(many=True, read_only=True)
     last_message = serializers.SerializerMethodField()
     unread_count = serializers.SerializerMethodField()
     is_blocked = serializers.SerializerMethodField()

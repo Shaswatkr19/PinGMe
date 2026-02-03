@@ -267,7 +267,16 @@ class ChatConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps({
             'type': 'theme_change',
             'theme': event['theme']
-        }))    
+        }))
+
+    async def reaction(self, event):
+        """Handle reaction broadcast"""
+        await self.send(text_data=json.dumps({
+            'type': 'reaction',
+            'message_id': event['message_id'],
+            'emoji': event['emoji'],
+            'user_id': event['user_id']
+        }))        
 
     # =============================
     # DB HELPERS

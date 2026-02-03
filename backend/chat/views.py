@@ -10,7 +10,55 @@ from rest_framework.permissions import IsAuthenticated
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.shortcuts import get_object_or_404
+from rest_framework.decorators import api_view
 
+
+@api_view(['POST'])
+def react_to_message(request, message_id):
+    """Add or remove reaction to a message"""
+    try:
+        message = Message.objects.get(id=message_id)
+        emoji = request.data.get('emoji')
+        
+        # Check if user is part of the thread
+        if request.user not in message.thread.members.all():
+            return Response(
+                {"error": "You don't have access to this message"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Toggle reaction
+        if emoji is None:
+            # Remove reaction
+            message.reaction = None
+        else:
+            # Add/update reaction
+            message.reaction = emoji
+        
+        message.save()
+        
+        # Broadcast to WebSocket
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"chat_{message.thread.id}",
+            {
+                "type": "reaction",
+                "message_id": message.id,
+                "emoji": emoji,
+                "user_id": request.user.id
+            }
+        )
+        
+        return Response({"success": True, "emoji": emoji})
+        
+    except Message.DoesNotExist:
+        return Response(
+            {"error": "Message not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
 
 class SetThreadThemeView(APIView):
     permission_classes = [IsAuthenticated]

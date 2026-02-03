@@ -53,5 +53,7 @@ class Message(models.Model):
         blank=True
     )
 
+    reaction = models.CharField(max_length=10, null=True, blank=True)
+
     def __str__(self):
         return f"{self.sender}: {self.text[:20]}"

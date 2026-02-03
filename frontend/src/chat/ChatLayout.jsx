@@ -46,8 +46,10 @@ export default function ChatLayout() {
   const recordingIntervalRef = useRef(null);
  
   const touchMovedRef = useRef(false);        
-  const longPressTimerRef = useRef(null); 
-      
+  const longPressTimerRef = useRef(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartXRef = useRef(0); 
+
   const [messageReactions, setMessageReactions] = useState({});
   
 
@@ -68,17 +70,28 @@ export default function ChatLayout() {
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState(null);
   const [replyingTo, setReplyingTo] = useState(null);
   const touchStartXRef = useRef(0);
-  const touchCurrentXRef = useRef(0);
+  const touchStartYRef = useRef(0);
     
 
   const [showReactions, setShowReactions] = useState(null);
 
   useEffect(() => {
-    const closeReactions = () => setShowReactions(null);
+    const closeReactions = (e) => {
+      // Don't close if clicking inside reaction picker
+      if (e.target.closest('[data-reaction-picker]')) return;
+      setShowReactions(null);
+    };
     
     if (showReactions) {
-      document.addEventListener('click', closeReactions);
-      return () => document.removeEventListener('click', closeReactions);
+      // Small delay to prevent immediate close
+      setTimeout(() => {
+        document.addEventListener('click', closeReactions, true);
+        document.addEventListener('touchstart', closeReactions, true);
+      }, 10);
+      return () => {
+        document.removeEventListener('click', closeReactions, true);
+        document.removeEventListener('touchstart', closeReactions, true);
+      };
     }
   }, [showReactions]);
 
@@ -293,29 +306,38 @@ useEffect(() => {
       const res = await fetchThreads();
       setThreads(res.data);
 
-      if (selectedThread) {
-        const updatedThread = res.data.find(
-          t => t.id === selectedThread.id
-        );
+      if (!selectedThread || !currentUser) return;
 
-        if (updatedThread) {
-          setSelectedThread(updatedThread);
-          localStorage.setItem(
-            "active_thread",
-            JSON.stringify(updatedThread)
-          );
+      const updatedThread = res.data.find(
+        t => t.id === selectedThread.id
+      );
 
-          // ✅ SINGLE SOURCE OF TRUTH
-          const otherUser = updatedThread.members.find(
-            m => m.id !== currentUser?.id
-          );
-        }
+      if (!updatedThread) return;
+
+      // ✅ update selected thread
+      setSelectedThread(updatedThread);
+      localStorage.setItem(
+        "active_thread",
+        JSON.stringify(updatedThread)
+      );
+
+      // ✅ SINGLE SOURCE OF TRUTH (follow / block)
+      const otherUser = updatedThread.members.find(
+        m => m.id !== currentUser.id
+      );
+
+      if (otherUser) {
+        setFollowState({
+          isFollowing: !!otherUser.is_following,
+          isBlocked: !! selectedThread.is_blocked,
+        });
       }
+
     } catch (err) {
       console.error("❌ Failed to refresh threads:", err);
     }
   };
-      
+        
 
   const handleDeleteMessage = async (messageId) => {
     try {
@@ -616,6 +638,15 @@ useEffect(() => {
         .then((res) => {
           console.log("✅ Messages loaded:", res.data);
           setMessages(res.data);
+          
+          // 🔥 LOAD REACTIONS FOR EACH MESSAGE
+          const reactions = {};
+          res.data.forEach(msg => {
+            if (msg.reaction) {
+              reactions[msg.id] = msg.reaction;
+            }
+          });
+          setMessageReactions(reactions);
         })
         .catch((err) => {
           console.error("❌ Message fetch error:", err);
@@ -1219,7 +1250,21 @@ const startRecording = async () => {
               : m
           )
         );
-      }  
+      }
+      
+      if (data.type === "reaction") {
+        setMessageReactions(prev => {
+          if (data.emoji === null) {
+            const copy = { ...prev };
+            delete copy[data.message_id];
+            return copy;
+          }
+          return {
+            ...prev,
+            [data.message_id]: data.emoji
+          };
+        });
+      }
   
       if (data.type === "presence") {
         const { user_id, is_online } = data;
@@ -1284,6 +1329,28 @@ const startRecording = async () => {
   const activeOtherUser = selectedThread?.members?.find(
     m => m.id !== currentUser?.id
   );
+
+  // 🔥 AUTO SYNC followState FROM BACKEND (THREAD CHANGE / REFRESH)
+  useEffect(() => {
+    if (!selectedThread || !currentUser) return;
+
+    const otherUser = selectedThread.members?.find(
+      m => m.id !== currentUser.id
+    );
+
+    if (!otherUser) return;
+
+    console.log("🔁 followState synced from backend:", {
+      is_following: otherUser.is_following,
+      is_blocked: selectedThread.is_blocked,
+    });
+
+    setFollowState({
+      isFollowing: !!otherUser.is_following,
+      isBlocked: !! selectedThread.is_blocked,
+    });
+  }, [selectedThread, currentUser]);
+
 
   const themeData = selectedThread?.chat_theme;
 
@@ -2653,22 +2720,16 @@ const startRecording = async () => {
                         onClick={async () => {
                           if (!activeOtherUser) return;
 
-                          // ❌ SELF BLOCK PROTECTION
-                          if (activeOtherUser.username === currentUser?.username) {
+                          if (activeOtherUser.id === currentUser.id) {
                             alert("You cannot block yourself");
                             return;
                           }
 
-                          setShowMenu(false); // ✅ menu pehle band
+                          setShowMenu(false);
 
                           try {
                             if (!followState.isBlocked) {
-                              // 🚫 BLOCK USER
-                              if (followState.isBlocked) {
-                                console.log("Already blocked");
-                                return;
-                              }
-
+                              // 🚫 BLOCK
                               await blockUser(activeOtherUser.username);
 
                               syncFollowState(
@@ -2677,7 +2738,7 @@ const startRecording = async () => {
                                 true   // blocked
                               );
                             } else {
-                              // 🔓 UNBLOCK USER
+                              // 🔓 UNBLOCK
                               await unblockUser(activeOtherUser.username);
 
                               syncFollowState(
@@ -2692,7 +2753,7 @@ const startRecording = async () => {
                           } catch (err) {
                             console.error("❌ Block/unblock failed:", err.response?.data);
                             alert(err.response?.data?.error || "Action failed");
-                            refreshThreads(); // rollback
+                            refreshThreads();
                           }
                         }}
                       />
@@ -2722,6 +2783,12 @@ const startRecording = async () => {
                               );
 
                               await refreshThreads();
+
+                            if (followState.isBlocked) {
+                              alert("Unblock user first");
+                              return;
+                            }  
+
                               
                             } else {
                               // FOLLOW
@@ -2994,58 +3061,111 @@ const startRecording = async () => {
                           <div
                             onContextMenu={(e) => {
                               e.preventDefault();
+                              e.stopPropagation();
                               setShowReactions(msg.id);
                             }}
 
+                            // MOBILE: Touch events
                             onTouchStart={(e) => {
-                              touchStartXRef.current = e.touches[0].clientX;
+                              const touch = e.touches[0];
+                              touchStartXRef.current = touch.clientX;
+                              touchStartYRef.current = touch.clientY;
                               touchMovedRef.current = false;
 
                               longPressTimerRef.current = setTimeout(() => {
-                                // 🔥 LONG PRESS (no swipe happened)
                                 if (!touchMovedRef.current) {
                                   setShowReactions(msg.id);
                                 }
                               }, 500);
                             }}
-
+                            
                             onTouchMove={(e) => {
-                              const currentX = e.touches[0].clientX;
-                              const diff = currentX - touchStartXRef.current;
-
-                              if (Math.abs(diff) > 10) {
+                              const touch = e.touches[0];
+                              const diffX = touch.clientX - touchStartXRef.current;
+                              const diffY = touch.clientY - touchStartYRef.current;
+                              
+                              const totalMovement = Math.sqrt(diffX * diffX + diffY * diffY);
+                              
+                              if (totalMovement > 10) {
                                 touchMovedRef.current = true;
                                 clearTimeout(longPressTimerRef.current);
                               }
-
-                              // 👉 SWIPE RIGHT TO REPLY
-                              if (!isOwn && diff > 80) {
-                                setReplyingTo(msg);
-                                clearTimeout(longPressTimerRef.current);
-                                touchStartXRef.current = 0;
+                              
+                              // Swipe right to reply
+                              if (!isOwn && diffX > 70 && Math.abs(diffX) > Math.abs(diffY) * 1.5) {
+                                if (diffX > 100) {
+                                  e.preventDefault();
+                                  clearTimeout(longPressTimerRef.current);
+                                  setReplyingTo(msg);
+                                  
+                                  touchStartXRef.current = 0;
+                                  touchStartYRef.current = 0;
+                                  touchMovedRef.current = true;
+                                }
                               }
                             }}
-
+                            
                             onTouchEnd={() => {
                               clearTimeout(longPressTimerRef.current);
                               touchStartXRef.current = 0;
+                              touchStartYRef.current = 0;
+                              touchMovedRef.current = false;
+                            }}
+
+                            // DESKTOP: Mouse drag events
+                            onMouseDown={(e) => {
+                              if (!isOwn) {
+                                setIsDragging(true);
+                                dragStartXRef.current = e.clientX;
+                                e.currentTarget.style.cursor = 'grab';
+                              }
+                            }}
+                            
+                            onMouseMove={(e) => {
+                              if (isDragging && !isOwn) {
+                                const diffX = e.clientX - dragStartXRef.current;
+                                
+                                if (diffX > 0) {
+                                  e.currentTarget.style.transform = `translateX(${Math.min(diffX, 120)}px)`;
+                                  e.currentTarget.style.cursor = diffX > 100 ? 'grabbing' : 'grab';
+                                }
+                              }
+                            }}
+                            
+                            onMouseUp={(e) => {
+                              if (isDragging && !isOwn) {
+                                const diffX = e.clientX - dragStartXRef.current;
+                                
+                                if (diffX > 100) {
+                                  setReplyingTo(msg);
+                                }
+                                
+                                e.currentTarget.style.transform = '';
+                                e.currentTarget.style.cursor = 'pointer';
+                                setIsDragging(false);
+                                dragStartXRef.current = 0;
+                              }
+                            }}
+                            
+                            onMouseLeave={(e) => {
+                              if (isDragging) {
+                                e.currentTarget.style.transform = '';
+                                e.currentTarget.style.cursor = 'pointer';
+                                setIsDragging(false);
+                              }
                             }}
 
                             style={{
                               padding: '8px 12px',
                               borderRadius: '16px',
-                              backgroundColor: isOwn
-                                ? "#2563EB"
-                                : theme === "dark"
-                                ? "#1E293B"
-                                : "#E4E6EB",
+                              backgroundColor: isOwn ? "#2563EB" : theme === "dark" ? "#1E293B" : "#E4E6EB",
                               color: isOwn ? "#FFFFFF" : theme === "dark" ? "#FFFFFF" : "#000000",
-                              wordWrap: "break-word",
                               position: "relative",
-                              maxWidth: "400px",
                               cursor: "pointer",
-                              userSelect: "none"
+                              userSelect: "none",
+                              transition: 'transform 0.2s ease-out'
                             }}
+
                           >
                             {/* DELETE BUTTON – only for own message */}
                             {isOwn && (
@@ -3079,6 +3199,7 @@ const startRecording = async () => {
                             {/* 😍 REACTION POPUP */}
                             {showReactions === msg.id && (
                               <div
+                                data-reaction-picker="true"
                                 onClick={(e) => e.stopPropagation()}
                                 style={{
                                   position: 'absolute',
@@ -3097,12 +3218,46 @@ const startRecording = async () => {
                                 {reactionEmojis.map(emoji => (
                                   <button
                                     key={emoji}
-                                    onClick={() => {
-                                      setMessageReactions(prev => ({
-                                        ...prev,
-                                        [msg.id]: emoji
-                                      }));
+                                    onClick={async () => {
+                                      // Toggle reaction
+                                      const currentReaction = messageReactions[msg.id];
+                                      const newReaction = currentReaction === emoji ? null : emoji;
+                                      
+                                      // Optimistic UI update
+                                      setMessageReactions(prev => {
+                                        if (newReaction === null) {
+                                          const copy = { ...prev };
+                                          delete copy[msg.id];
+                                          return copy;
+                                        }
+                                        return {
+                                          ...prev,
+                                          [msg.id]: newReaction
+                                        };
+                                      });
+                                      
                                       setShowReactions(null);
+                                      
+                                      // Send to backend
+                                      try {
+                                        await api.post(`/chat/message/${msg.id}/react/`, {
+                                          emoji: newReaction  // null to remove, emoji to add
+                                        });
+                                      } catch (err) {
+                                        console.error("Failed to save reaction:", err);
+                                        // Revert on error
+                                        setMessageReactions(prev => {
+                                          if (currentReaction === null) {
+                                            const copy = { ...prev };
+                                            delete copy[msg.id];
+                                            return copy;
+                                          }
+                                          return {
+                                            ...prev,
+                                            [msg.id]: currentReaction
+                                          };
+                                        });
+                                      }
                                     }}
                                     style={{
                                       width: '32px',
@@ -3126,6 +3281,55 @@ const startRecording = async () => {
                                 ))}
                               </div>
                             )}
+
+                            {/* ❤️ REACTION DISPLAY */}
+                            {messageReactions[msg.id] && (
+                              <div
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  
+                                  const oldReaction = messageReactions[msg.id];
+                                  
+                                  // Optimistic UI
+                                  setMessageReactions(prev => {
+                                    const copy = { ...prev };
+                                    delete copy[msg.id];
+                                    return copy;
+                                  });
+                                  
+                                  // Backend sync
+                                  try {
+                                    await api.post(`/chat/message/${msg.id}/react/`, {
+                                      emoji: null
+                                    });
+                                  } catch (err) {
+                                    console.error("Remove failed:", err);
+                                    // Revert
+                                    setMessageReactions(prev => ({
+                                      ...prev,
+                                      [msg.id]: oldReaction
+                                    }));
+                                  }
+                                }}
+                                style={{
+                                  position: "absolute",
+                                  bottom: "-22px",
+                                  right: isOwn ? "8px" : "auto",
+                                  left: isOwn ? "auto" : "8px",
+                                  background: theme === "dark" ? "#020617" : "#fff",
+                                  padding: "4px 8px",
+                                  borderRadius: "12px",
+                                  fontSize: "14px",
+                                  cursor: "pointer",
+                                  boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+                                  userSelect: "none"
+                                }}
+                                title="Click to remove reaction"
+                              >
+                                {messageReactions[msg.id]}
+                              </div>
+                            )}
+                                      
 
                             {/* Attachment */}
                             {msg.attachment && (
