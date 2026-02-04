@@ -1562,10 +1562,11 @@ const startRecording = async () => {
                     : `http://127.0.0.1:8000${selectedUserProfile.avatar}`
                 }
                 onClick={() => {
-                  const url =
-                    selectedUserProfile.avatar?.startsWith("http")
+                  // ✅ FIXED: Use avatar_url first (it's already a full URL from backend)
+                  const url = selectedUserProfile.avatar_url || 
+                    (selectedUserProfile.avatar?.startsWith("http")
                       ? selectedUserProfile.avatar
-                      : `http://127.0.0.1:8000${selectedUserProfile.avatar}`;
+                      : `http://127.0.0.1:8000${selectedUserProfile.avatar}`);
                 
                   setAvatarPreviewUrl(url);
                   setShowAvatarPreview(true);
@@ -2031,8 +2032,15 @@ const startRecording = async () => {
           }}>
             {/* User Info */}
             <div
-              onClick={() => {
-                setSelectedUserProfile(currentUser); // 🔥 OWN PROFILE MODAL
+              onClick={async () => {
+                // ✅ For own profile, fetch fresh data
+                try {
+                  const response = await api.get(`/chat/user/${currentUser.id}/`);
+                  setSelectedUserProfile(response.data);
+                } catch (err) {
+                  console.error("Failed to fetch own profile:", err);
+                  setSelectedUserProfile(currentUser); // fallback
+                }
               }}
               style={{
                 display: 'flex',
@@ -2211,9 +2219,16 @@ const startRecording = async () => {
                 onThreadSelect={handleThreadSelect}
                 currentUser={currentUser}
                 onFollowUpdate={handleFollowUpdate}
-                onUserClick={(user) => {
-                  setSelectedUserProfile(user);
-                  setSelectedThread(null);
+                onUserClick={async (user) => {
+                  // ✅ NEW - fetch full data
+                  try {
+                    const response = await api.get(`/chat/user/${user.id}/`);
+                    setSelectedUserProfile(response.data);
+                    setSelectedThread(null);
+                  } catch (err) {
+                    console.error("Failed to fetch user:", err);
+                    setSelectedUserProfile(user); // fallback
+                  }
                 }}  
               />
             )}
@@ -2473,9 +2488,18 @@ const startRecording = async () => {
 
                   return (
                     <div
-                    onClick={() => {
-                      setSelectedUserProfile(otherUser);
-                    }}
+                      onClick={async () => {
+                        console.log("🔍 Fetching user profile for ID:", otherUser.id);
+                        
+                        try {
+                          const response = await api.get(`/chat/user/${otherUser.id}/`);
+                          console.log("✅ User data received:", response.data);
+                          setSelectedUserProfile(response.data);
+                        } catch (err) {
+                          console.error("❌ Failed to fetch user:", err.response?.data || err);
+                          alert("Failed to load user profile");
+                        }
+                      }}
                       style={{
                         display: "flex",
                         alignItems: "center",
@@ -2485,7 +2509,26 @@ const startRecording = async () => {
                       }}
                     >
                       {/* Avatar */}
-                      <div style={{ width: 40, height: 40, position: "relative" }}>
+                      <div 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          
+                          if (otherUser.avatar_url) {
+                            const url = otherUser.avatar_url.startsWith("http")
+                              ? otherUser.avatar_url
+                              : `http://127.0.0.1:8000${otherUser.avatar_url}`;
+                            
+                            setAvatarPreviewUrl(url);
+                            setShowAvatarPreview(true);
+                          }
+                        }}
+                        style={{ 
+                          width: 40, 
+                          height: 40, 
+                          position: "relative",
+                          cursor: otherUser.avatar_url ? "pointer" : "default"
+                        }}
+                      >
                         {otherUser.avatar_url ? (
                           <img
                             src={otherUser.avatar_url}
@@ -2503,8 +2546,7 @@ const startRecording = async () => {
                               width: "100%",
                               height: "100%",
                               borderRadius: "50%",
-                              background:
-                                "linear-gradient(135deg,#6366f1,#ec4899)",
+                              background: "linear-gradient(135deg,#6366f1,#ec4899)",
                               color: "#fff",
                               display: "flex",
                               alignItems: "center",
@@ -2538,20 +2580,22 @@ const startRecording = async () => {
                           style={{
                             fontSize: 16,
                             fontWeight: 600,
-                            color:
-                              theme === "dark" ? "#E5E7EB" : "#1C1E21",
+                            color: theme === "dark" ? "#E5E7EB" : "#1C1E21",
                           }}
                         >
                           {otherUser.username}
                         </div>
-                        <div style={{ fontSize: '13px', color: otherUser?.is_online ? "#22c55e" : "#94A3B8", }}>
+                        <div style={{ 
+                          fontSize: '13px', 
+                          color: otherUser?.is_online ? "#22c55e" : "#94A3B8" 
+                        }}>
                           {otherUser.is_online ? "Active now" : "Offline"}
                         </div>
                       </div>
                     </div>
                   );
                 })()}
-
+ 
                 {(() => {
                   const otherUser = selectedThread?.members?.find(
                     m => m.id !== currentUser?.id

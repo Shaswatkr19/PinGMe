@@ -11,6 +11,26 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
+from .serializers import UserProfileSerializer 
+from django.contrib.auth import get_user_model
+
+
+
+User = get_user_model()
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_user_profile(request, user_id):
+    """
+    Get full user profile
+    URL: /api/chat/user/<user_id>/
+    """
+    try:
+        user = User.objects.get(id=user_id)
+        serializer = UserProfileSerializer(user, context={'request': request})
+        return Response(serializer.data)
+    except User.DoesNotExist:
+        return Response({'error': 'User not found'}, status=404)
 
 
 class MarkThreadReadView(APIView):

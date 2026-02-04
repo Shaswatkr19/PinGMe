@@ -7,6 +7,62 @@ import mimetypes
 
 User = get_user_model()
 
+class UserProfileSerializer(serializers.ModelSerializer):
+    """Full user profile with all details"""
+    avatar_url = serializers.SerializerMethodField()
+    is_online = serializers.SerializerMethodField()
+    is_following = serializers.SerializerMethodField()
+    is_blocked = serializers.SerializerMethodField()
+    followers_count = serializers.SerializerMethodField()
+    following_count = serializers.SerializerMethodField()
+    bio = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "username",
+            "avatar_url",
+            "bio",
+            "is_online",
+            "is_following",
+            "is_blocked",
+            "followers_count",
+            "following_count",
+        ]
+
+    def get_avatar_url(self, obj):
+        request = self.context.get("request")
+        if obj.avatar and request:
+            return request.build_absolute_uri(obj.avatar.url)
+        return None
+
+    def get_is_online(self, obj):
+        return bool(cache.get(f"user_online_{obj.id}"))
+
+    def get_is_following(self, obj):
+        request = self.context.get("request")
+        if request and request.user.is_authenticated:
+            return request.user.following.filter(id=obj.id).exists()
+        return False
+
+    def get_is_blocked(self, obj):
+        request = self.context.get("request")
+        if request and request.user.is_authenticated:
+            # User ne mujhe block kiya hai?
+            return obj.blocked_users.filter(id=request.user.id).exists()
+        return False
+
+    def get_followers_count(self, obj):
+        if hasattr(obj, 'followers'):
+            return obj.followers.count()
+        return 0
+
+    def get_following_count(self, obj):
+        if hasattr(obj, 'following'):
+            return obj.following.count()
+        return 0
+
 
 class ThreadUserSerializer(serializers.ModelSerializer):
     avatar_url = serializers.SerializerMethodField()
