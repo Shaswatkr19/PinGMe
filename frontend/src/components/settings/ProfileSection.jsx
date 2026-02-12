@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
 export default function ProfileSection({ user, onUpdate, onUserUpdate }) {
   const [bio, setBio] = useState(user?.bio || "");
@@ -16,9 +17,9 @@ export default function ProfileSection({ user, onUpdate, onUserUpdate }) {
       if (user.avatar_url) {
         setAvatarPreview(user.avatar_url);
       } else if (user.avatar) {
-        const avatarUrl = user.avatar.startsWith('http') 
-          ? user.avatar 
-          : `http://127.0.0.1:8000${user.avatar}`;
+        const avatarUrl = user.avatar.startsWith("http")
+          ? user.avatar
+          : `${API_BASE}${user.avatar}`;
         setAvatarPreview(avatarUrl);
       } else {
         setAvatarPreview(null);
@@ -85,9 +86,9 @@ export default function ProfileSection({ user, onUpdate, onUserUpdate }) {
       if (result.user?.avatar_url) {
         setAvatarPreview(result.user.avatar_url);
       } else if (result.user?.avatar) {
-        const avatarUrl = result.user.avatar.startsWith('http') 
-          ? result.user.avatar 
-          : `http://127.0.0.1:8000${result.user.avatar}`;
+        const avatarUrl = result.user.avatar.startsWith("http")
+          ? result.user.avatar
+          : `${API_BASE}${result.user.avatar}`;
         setAvatarPreview(avatarUrl);
       } else {
         // If avatar was removed, clear preview

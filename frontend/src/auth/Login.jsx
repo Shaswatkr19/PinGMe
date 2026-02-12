@@ -1,6 +1,6 @@
 import { useState } from "react";
-import axios from "axios";
 import { Link } from "react-router-dom";
+import api from "../api/axios"; 
 
 export default function Login() {
   const [username, setUsername] = useState("");
@@ -15,13 +15,13 @@ export default function Login() {
     setLoading(true);
   
     try {
-      const res = await axios.post(
-        "http://127.0.0.1:8000/api/auth/token/",
-        {
-          username,
-          password,
-        }
-      );
+      const res = await api.post(
+      "/auth/token/",
+      {
+        username,
+        password,
+      }
+    );
   
       // ✅ Save JWT tokens
       localStorage.setItem("access", res.data.access);

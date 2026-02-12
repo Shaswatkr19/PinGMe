@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { getFollowing, unfollowUser } from "../../api/auth.api";
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
 export default function FollowingSection() {
   const [following, setFollowing] = useState([]);
@@ -36,10 +37,11 @@ export default function FollowingSection() {
 
   const getAvatarUrl = (user) => {
     if (user.avatar_url) return user.avatar_url;
-    if (user.avatar) {
-      return user.avatar.startsWith('http') ? user.avatar : `http://127.0.0.1:8000${user.avatar}`;
-    }
-    return null;
+    if (!user.avatar) return null;
+  
+    if (user.avatar.startsWith("http")) return user.avatar;
+  
+    return `${API_BASE}${user.avatar}`;
   };
 
   const getInitials = (username) => {

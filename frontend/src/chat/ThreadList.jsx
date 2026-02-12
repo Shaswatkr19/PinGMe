@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchThreads } from "../api/chat.api";
 import "./ThreadList.css";
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
 export default function ThreadList({ onSelect }) {
   const [threads, setThreads] = useState([]);
@@ -9,9 +10,8 @@ export default function ThreadList({ onSelect }) {
 
   const getAvatarUrl = (user) => {
     if (!user?.avatar) return null;
-    return user.avatar.startsWith("http")
-      ? user.avatar
-      : `http://127.0.0.1:8000${user.avatar}`;
+    if (user.avatar.startsWith("http")) return user.avatar;
+    return `${API_BASE}${user.avatar}`;
   };
 
   useEffect(() => {

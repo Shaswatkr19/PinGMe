@@ -5,6 +5,7 @@ import { fetchThreads } from "../api/chat.api";
 import UserSearch from "../components/UserSearch";
 import Settings from "../pages/Settings";
 import { blockUser, unblockUser } from "../api/auth.api";
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
 export default function ChatLayout() {
   const [threads, setThreads] = useState([]);
@@ -509,7 +510,7 @@ useEffect(() => {
       if (!token) return;
     
       const ws = new WebSocket(
-        `ws://127.0.0.1:8000/ws/call/${selectedThread.id}/?token=${token}`
+        `${import.meta.env.VITE_WS_BASE_URL}/ws/call/${selectedThread.id}/?token=${token}`
       );
     
       callSocketRef.current = ws;
@@ -1394,7 +1395,7 @@ const startRecording = async () => {
     if (!token) return;
   
     const ws = new WebSocket(
-      `ws://127.0.0.1:8000/ws/chat/${selectedThread.id}/?token=${token}`
+      `${import.meta.env.VITE_WS_BASE_URL}/ws/chat/${selectedThread.id}/?token=${token}`
     );
   
     chatSocketRef.current = ws;
@@ -1559,14 +1560,14 @@ const startRecording = async () => {
                 src={
                   (selectedUserProfile.avatar || selectedUserProfile.avatar_url).startsWith("http")
                     ? (selectedUserProfile.avatar || selectedUserProfile.avatar_url)
-                    : `http://127.0.0.1:8000${selectedUserProfile.avatar}`
+                    :  `${API_BASE}${selectedUserProfile.avatar}`
                 }
                 onClick={() => {
                   // ✅ FIXED: Use avatar_url first (it's already a full URL from backend)
                   const url = selectedUserProfile.avatar_url || 
                     (selectedUserProfile.avatar?.startsWith("http")
                       ? selectedUserProfile.avatar
-                      : `http://127.0.0.1:8000${selectedUserProfile.avatar}`);
+                      : `${API_BASE}${selectedUserProfile.avatar}`);
                 
                   setAvatarPreviewUrl(url);
                   setShowAvatarPreview(true);
@@ -2057,7 +2058,7 @@ const startRecording = async () => {
                   {(() => {
                     const avatarUrl = currentUser.avatar_url || 
                       (currentUser.avatar ? 
-                        (currentUser.avatar.startsWith('http') ? currentUser.avatar : `http://127.0.0.1:8000${currentUser.avatar}`) 
+                        (currentUser.avatar.startsWith('http') ? currentUser.avatar : `${API_BASE}${currentUser.avatar}`) 
                         : null);
                     
                     return avatarUrl ? (
@@ -2295,7 +2296,7 @@ const startRecording = async () => {
 
                       const url = otherUser.avatar_url.startsWith("http")
                         ? otherUser.avatar_url
-                        : `http://127.0.0.1:8000${otherUser.avatar_url}`;
+                        : `${API_BASE}${otherUser.avatar_url}`;
 
                       setAvatarPreviewUrl(url);
                       setShowAvatarPreview(true);
@@ -2516,7 +2517,7 @@ const startRecording = async () => {
                           if (otherUser.avatar_url) {
                             const url = otherUser.avatar_url.startsWith("http")
                               ? otherUser.avatar_url
-                              : `http://127.0.0.1:8000${otherUser.avatar_url}`;
+                              : `${API_BASE}${otherUser.avatar_url}`;
                             
                             setAvatarPreviewUrl(url);
                             setShowAvatarPreview(true);
