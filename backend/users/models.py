@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
+from cloudinary.models import CloudinaryField
 
 class UserManager(BaseUserManager):
     def create_user(self, username, password=None, email=None, **extra_fields):
@@ -23,7 +24,7 @@ class UserManager(BaseUserManager):
 class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(max_length=255, unique=True, null=False, blank=False)
     username = models.CharField(max_length=150, unique=True)
-    avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
+    avatar = CloudinaryField("avatar", blank=True, null=True)
     bio = models.TextField(blank=True)
     following = models.ManyToManyField("self", symmetrical=False, related_name="followers", blank=True)
 
